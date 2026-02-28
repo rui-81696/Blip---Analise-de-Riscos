@@ -1,0 +1,208 @@
+/*
+ * ===== _mixins.scss =====
+ * Ficheiro de MIXINS SCSS.
+ *
+ * O QUE SÃO MIXINS?
+ * Mixins são como "funções" em SCSS. Definem blocos de CSS reutilizáveis.
+ * Em vez de repetir o mesmo CSS em vários componentes, definimos um mixin
+ * e usamos @include para o "chamar".
+ *
+ * EXEMPLO:
+ *   @mixin card { background: #1a1a2e; border-radius: 12px; }
+ *   .meu-componente { @include card; }  ← aplica todos os estilos do mixin
+ *
+ * DIFERENÇA ENTRE VARIÁVEIS E MIXINS:
+ * - Variáveis ($primary) guardam UM VALOR
+ * - Mixins guardam BLOCOS inteiros de CSS (múltiplas propriedades)
+ */
+
+// Importar variáveis para usar nos mixins
+@use 'variables' as *;
+
+// ─── Mixin Responsivo ───
+// Facilita a criação de @media queries (CSS responsivo)
+// USO: @include respond-to(lg) { /* estilos para ecrãs >= 1024px */ }
+// @content é o bloco de CSS passado entre { } quando se usa o mixin
+@mixin respond-to($breakpoint) {
+  @if $breakpoint == sm {
+    @media (min-width: $breakpoint-sm) { @content; }
+  } @else if $breakpoint == md {
+    @media (min-width: $breakpoint-md) { @content; }
+  } @else if $breakpoint == lg {
+    @media (min-width: $breakpoint-lg) { @content; }
+  } @else if $breakpoint == xl {
+    @media (min-width: $breakpoint-xl) { @content; }
+  } @else if $breakpoint == 2xl {
+    @media (min-width: $breakpoint-2xl) { @content; }
+  }
+}
+
+// ─── Mixin Card (Cartão) ───
+// Estilo base para todos os cartões/painéis da aplicação
+// USO: @include card;
+@mixin card {
+  background: $bg-card;              // Fundo escuro
+  border-radius: $border-radius-lg;  // Cantos arredondados (12px)
+  border: 1px solid $border-color;   // Borda subtil
+  padding: $spacing-lg;              // Espaçamento interno (24px)
+  box-shadow: $shadow-sm;            // Sombra leve
+}
+
+// ─── Mixins Flexbox ───
+// Flexbox é o sistema de CSS para alinhar elementos.
+// Estes mixins simplificam os padrões mais comuns.
+
+// Centralizar na horizontal E vertical
+@mixin flex-center {
+  display: flex;
+  align-items: center;     // Centra verticalmente
+  justify-content: center; // Centra horizontalmente
+}
+
+// Espaçar items nas extremidades (início e fim)
+// Útil para headers: título à esquerda, botão à direita
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; // Espaça nas extremidades
+}
+
+// Empilhar elementos verticalmente
+@mixin flex-column {
+  display: flex;
+  flex-direction: column; // Itens em coluna (de cima para baixo)
+}
+
+// ─── Truncar Texto ───
+// Quando o texto é muito longo, corta e mostra "..."
+// USO: @include truncate; (em elementos com largura fixa)
+@mixin truncate {
+  white-space: nowrap;        // Não quebra linha
+  overflow: hidden;           // Esconde o excesso
+  text-overflow: ellipsis;    // Mostra "..." no final
+}
+
+// ─── Cor por Nível de Risco ───
+// NOTA: Este mixin usa condições @if para escolher cor com base no score
+// Não é usado diretamente no CSS final (usa-se JS para definir classes dinâmicas)
+@mixin risk-color($score) {
+  @if $score <= 25 {
+    color: $risk-low;       // Verde
+  } @else if $score <= 50 {
+    color: $risk-medium;    // Amarelo
+  } @else if $score <= 75 {
+    color: $risk-high;      // Laranja
+  } @else {
+    color: $risk-critical;  // Vermelho
+  }
+}
+
+// ─── Badge de Estado ───
+// Estilo base para os badges (etiquetas) de estado e risco
+// O parâmetro $status não é usado — é apenas o estilo base
+@mixin status-badge($status) {
+  padding: $spacing-xs $spacing-sm;    // Espaçamento interno (4px 8px)
+  border-radius: $border-radius-sm;    // Cantos ligeiramente arredondados
+  font-size: $font-size-xs;            // Texto pequeno (12px)
+  font-weight: 600;                    // Semi-negrito
+  text-transform: uppercase;           // MAIÚSCULAS
+  letter-spacing: 0.5px;              // Espaçamento entre letras
+}
+
+// ─── Scrollbar Personalizada ───
+// Estiliza a barra de scroll (só funciona em browsers WebKit: Chrome, Edge, Safari)
+// & refere-se ao elemento PAI onde o mixin é incluído
+@mixin custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;   // Largura da scrollbar vertical
+    height: 6px;  // Altura da scrollbar horizontal
+  }
+
+  &::-webkit-scrollbar-track {
+    background: $bg-dark;    // Fundo da "pista" da scrollbar
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: $border-color; // O "polegar" (a parte que se arrasta)
+    border-radius: 3px;
+
+    &:hover {
+      background: $text-muted; // Mais claro ao passar o rato
+    }
+  }
+}
+
+// ─── Estilo Base de Input ───
+// Aplicado a todos os campos de formulário (inputs, selects)
+@mixin input-base {
+  background: $bg-input;                  // Fundo escuro
+  border: 1px solid $border-color;        // Borda subtil
+  border-radius: $border-radius-md;       // Cantos arredondados
+  color: $text-primary;                   // Texto claro
+  padding: $spacing-sm $spacing-md;       // Espaçamento interno
+  font-size: $font-size-sm;              // Texto 14px
+  font-family: $font-family;             // Fonte do projeto
+  transition: border-color $transition-fast; // Animação suave da borda
+
+  // :focus = quando o utilizador clica/foca no campo
+  &:focus {
+    outline: none;              // Remove o contorno azul padrão do browser
+    border-color: $primary;     // Borda vermelha (cor principal)
+  }
+
+  // ::placeholder = texto cinza que aparece antes de o utilizador escrever
+  &::placeholder {
+    color: $text-muted;
+  }
+}
+
+// ─── Estilo Base de Botão ───
+// Todas as propriedades comuns a qualquer botão da aplicação
+@mixin button-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;                    // Espaço entre ícone e texto
+  padding: $spacing-sm $spacing-lg;    // Espaçamento interno
+  border: none;
+  border-radius: $border-radius-md;    // Cantos arredondados
+  font-size: $font-size-sm;
+  font-family: $font-family;
+  font-weight: 600;                    // Semi-negrito
+  cursor: pointer;                     // Cursor "mãozinha"
+  transition: all $transition-fast;    // Animação suave
+
+  // :disabled = quando o botão está desativado
+  &:disabled {
+    opacity: 0.5;              // Semi-transparente
+    cursor: not-allowed;       // Cursor "proibido"
+  }
+}
+
+// ─── Botão Primário ───
+// Botão principal da aplicação (fundo vermelho, texto branco)
+@mixin button-primary {
+  @include button-base;         // Herda estilos base
+  background: $primary;         // Fundo vermelho
+  color: white;
+
+  // :hover:not(:disabled) = quando o rato passa por cima E o botão NÃO está desativado
+  &:hover:not(:disabled) {
+    background: $primary-light; // Fica mais claro
+  }
+}
+
+// ─── Botão Secundário ───
+// Botão discreto (fundo transparente, borda subtil)
+@mixin button-secondary {
+  @include button-base;
+  background: transparent;
+  color: $text-primary;
+  border: 1px solid $border-color;
+
+  &:hover:not(:disabled) {
+    background: $bg-card-hover;    // Fundo ligeiramente visível
+    border-color: $text-muted;     // Borda mais visível
+  }
+}

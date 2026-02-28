@@ -1,0 +1,19 @@
+{
+  "name": "blip-backend",
+  "version": "1.0.0",
+  "description": "Backend API para Blip Risk Analysis",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/data/seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "lowdb": "^7.0.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {}
+}

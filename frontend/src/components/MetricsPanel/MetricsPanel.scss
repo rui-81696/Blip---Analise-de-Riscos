@@ -1,0 +1,195 @@
+/*
+ * ===== MetricsPanel.scss =====
+ * Estilos do PAINEL DE MÉTRICAS.
+ *
+ * Este painel mostra:
+ * 1. Cards com métricas resumidas (total apostas, lucro, etc.)
+ * 2. Gráfico de barras horizontais com distribuição de risco
+ *
+ * ESTRUTURA VISUAL:
+ * ┌──────────────────────────────────┐
+ * │ Métricas de Risco (título)        │
+ * │ ┌────┐ ┌────┐ ┌────┐             │
+ * │ │ 📊 │ │ 💰 │ │ ⚠️ │  ← cards   │
+ * │ └────┘ └────┘ └────┘             │
+ * │ Distribuição de Risco             │
+ * │ Baixo   ████████░░░░  45%         │
+ * │ Médio   █████░░░░░░░  30%  ← barras
+ * │ Alto    ███░░░░░░░░░  15%         │
+ * │ Crítico █░░░░░░░░░░░  10%         │
+ * └──────────────────────────────────┘
+ */
+
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.metrics-panel {
+  @include card; // Estilo de cartão
+
+  // Título principal do painel
+  &__title {
+    font-size: $font-size-lg;
+    font-weight: 600;
+    margin-bottom: $spacing-lg;
+  }
+
+  // Subtítulo (ex: "Distribuição de Risco")
+  &__subtitle {
+    font-size: $font-size-base;
+    font-weight: 600;
+    margin-bottom: $spacing-md;
+    color: $text-secondary;
+  }
+
+  // ─── Grelha de Cards de Métricas ───
+  &__grid {
+    display: grid;
+    // Colunas automáticas, mínimo 180px cada
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: $spacing-md;
+    margin-bottom: $spacing-xl;
+
+    // Em ecrãs grandes: exatamente 3 colunas
+    @include respond-to(xl) {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  // ─── Card individual de métrica ───
+  &__card {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md;
+    border-radius: $border-radius-md;
+    background: rgba(0, 0, 0, 0.2);  // Fundo semi-transparente
+    border: 1px solid $border-color;
+    // Anima transform E box-shadow ao hover
+    transition: transform $transition-fast, box-shadow $transition-fast;
+
+    // Efeito hover: sobe 2px e ganha sombra (efeito "elevação")
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: $shadow-md;
+    }
+
+    // Modificadores: borda esquerda colorida indica o tipo de card
+    &--success {
+      border-left: 3px solid $success; // Verde (lucro)
+    }
+
+    &--danger {
+      border-left: 3px solid $danger; // Vermelho (perdas)
+    }
+
+    &--warning {
+      border-left: 3px solid $warning; // Amarelo (atenção)
+    }
+
+    &--info {
+      border-left: 3px solid $info; // Azul (informação)
+    }
+  }
+
+  // Ícone emoji do card
+  &__card-icon {
+    font-size: $font-size-2xl; // 24px
+  }
+
+  // Container do valor + label
+  &__card-content {
+    @include flex-column;
+  }
+
+  // Valor numérico (ex: "1.250")
+  &__card-value {
+    font-size: $font-size-lg;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums; // Números alinhados em coluna
+  }
+
+  // Etiqueta descritiva (ex: "TOTAL APOSTAS")
+  &__card-label {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  // ─── Secção de Distribuição de Risco (barras) ───
+  &__distribution {
+    padding-top: $spacing-lg;
+    border-top: 1px solid $border-color; // Linha separadora
+  }
+
+  // Container de todas as barras
+  &__bars {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+  }
+
+  // Cada barra individual (header + barra visual)
+  &__bar-group {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+  }
+
+  // Cabeçalho da barra ("Baixo" à esquerda, "45%" à direita)
+  &__bar-header {
+    @include flex-between;
+  }
+
+  // Nome do nível ("Baixo", "Médio", etc.)
+  &__bar-label {
+    font-size: $font-size-xs;
+  }
+
+  // Valor percentual
+  &__bar-value {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    font-variant-numeric: tabular-nums;
+  }
+
+  // "Pista" da barra (o fundo cinza)
+  &__bar-track {
+    height: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    overflow: hidden; // Esconde a barra de preenchimento que ultrapassa
+  }
+
+  // Preenchimento colorido da barra (a parte que mostra a percentagem)
+  // A largura (width) é definida inline no JSX via style={{ width: '45%' }}
+  &__bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width $transition-slow; // Animação suave ao mudar de largura
+
+    // Cores por nível de risco
+    &--low {
+      background: $risk-low;      // Verde
+    }
+
+    &--medium {
+      background: $risk-medium;   // Amarelo
+    }
+
+    &--high {
+      background: $risk-high;     // Laranja
+    }
+
+    &--critical {
+      background: $risk-critical; // Vermelho
+    }
+  }
+
+  // Estado de carregamento
+  &__loading {
+    @include flex-center;
+    padding: $spacing-xl;
+    color: $text-muted;
+  }
+}

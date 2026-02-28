@@ -1,0 +1,189 @@
+/*
+ * ===== Chat.scss =====
+ * Estilos do componente de CHAT FLUTUANTE.
+ *
+ * É uma janela de chat que "flutua" no canto inferior direito da página.
+ * Tem um botão redondo que abre/fecha a janela.
+ *
+ * CONCEITOS CSS USADOS:
+ * - position: fixed → Posição fixa no ecrã (não se move com o scroll)
+ * - Flexbox → Para layout interno das mensagens
+ * - @keyframes → Animação dos pontos de "a escrever..."
+ */
+
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// ─── Botão flutuante (o círculo redondo que abre o chat) ───
+.chat-toggle {
+  position: fixed;           // Fixo no ecrã (não se move com scroll)
+  bottom: 24px;              // 24px do fundo
+  right: 24px;               // 24px da direita
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;        // 50% faz um CÍRCULO
+  background: $primary;      // Fundo vermelho
+  color: white;
+  border: none;
+  font-size: $font-size-xl;
+  cursor: pointer;
+  box-shadow: $shadow-lg;    // Sombra forte (efeito de elevação)
+  transition: all $transition-fast;
+  z-index: $z-modal + 1;     // Fica À FRENTE da janela de chat (201)
+  @include flex-center;      // Centra o ícone dentro do botão
+
+  &:hover {
+    background: $primary-light;  // Mais claro ao hover
+    transform: scale(1.05);      // Fica 5% maior (efeito de "pulso")
+  }
+
+  // Quando o chat está aberto, o botão muda de estilo
+  &--active {
+    background: $bg-card;
+    border: 1px solid $border-color;
+
+    &:hover {
+      background: $bg-card-hover;
+    }
+  }
+}
+
+// ─── Janela de Chat ───
+.chat {
+  position: fixed;                     // Fixo no ecrã
+  bottom: 96px;                        // Acima do botão flutuante
+  right: 24px;                         // Alinhado com o botão
+  width: 380px;                        // Largura fixa
+  max-height: 500px;                   // Altura máxima
+  background: $bg-card;                // Fundo escuro
+  border: 1px solid $border-color;
+  border-radius: $border-radius-xl;    // Cantos muito arredondados (16px)
+  box-shadow: $shadow-lg;              // Sombra de elevação
+  z-index: $z-modal;                   // Camada do modal (200)
+  display: flex;
+  flex-direction: column;              // Empilha: header → mensagens → input
+  overflow: hidden;
+
+  // Cabeçalho do chat (título e estado)
+  &__header {
+    padding: $spacing-md $spacing-lg;
+    background: rgba(0, 0, 0, 0.2);           // Fundo ligeiramente mais escuro
+    border-bottom: 1px solid $border-color;
+  }
+
+  &__header-info {
+    @include flex-column;
+  }
+
+  &__header-title {
+    font-weight: 700; // Negrito
+    font-size: $font-size-base;
+  }
+
+  &__header-status {
+    font-size: $font-size-xs;
+    color: $text-muted; // Texto discreto
+  }
+
+  // ─── Área das mensagens ───
+  &__messages {
+    flex: 1;                   // Ocupa o espaço disponível
+    overflow-y: auto;          // Scroll vertical quando há muitas mensagens
+    padding: $spacing-md;
+    display: flex;
+    flex-direction: column;    // Mensagens empilhadas verticalmente
+    gap: $spacing-sm;          // Espaço entre mensagens
+    max-height: 340px;
+    @include custom-scrollbar;
+  }
+
+  // Cada mensagem individual (bolha de texto)
+  &__message {
+    max-width: 85%;                    // Máximo 85% da largura (não ocupa tudo)
+    padding: $spacing-sm $spacing-md;
+    border-radius: $border-radius-lg;   // Cantos arredondados (12px)
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    word-wrap: break-word;              // Quebra palavras longas
+
+    // Mensagem do utilizador (alinhada à DIREITA, fundo vermelho)
+    &--user {
+      align-self: flex-end;                          // Alinha à direita
+      background: $primary;                          // Fundo vermelho
+      color: white;
+      border-bottom-right-radius: $border-radius-sm; // Canto inferior direito reto
+    }
+
+    // Mensagem do assistente (alinhada à ESQUERDA, fundo escuro)
+    &--assistant {
+      align-self: flex-start;                       // Alinha à esquerda
+      background: $bg-input;
+      color: $text-primary;
+      border-bottom-left-radius: $border-radius-sm; // Canto inferior esquerdo reto
+    }
+  }
+
+  // ─── Animação "A escrever..." (3 pontos a saltar) ───
+  &__typing {
+    display: flex;
+    gap: 4px;
+    padding: $spacing-xs 0;
+
+    // Cada ponto é um <span> com animação
+    span {
+      width: 8px;
+      height: 8px;
+      background: $text-muted;
+      border-radius: 50%;                   // Círculo
+      animation: typing 1.2s infinite;       // Animação infinita
+
+      // O 2º e 3º ponto têm delay para criar efeito "onda"
+      &:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+
+      &:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+    }
+  }
+
+  // Área do input (campo de texto + botão enviar)
+  &__input-area {
+    display: flex;
+    gap: $spacing-sm;
+    padding: $spacing-md;
+    border-top: 1px solid $border-color; // Linha separadora
+  }
+
+  // Campo de texto para escrever mensagem
+  &__input {
+    @include input-base; // Estilo base de input
+    flex: 1;             // Ocupa o espaço restante
+  }
+
+  // Botão de enviar
+  &__send-btn {
+    @include button-primary; // Botão vermelho
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: $font-size-lg;
+  }
+}
+
+// ─── Animação dos pontos "a escrever" ───
+// @keyframes define os estados da animação ao longo do tempo
+// 0%→início, 30%→ponto alto, 60%→volta ao lugar, 100%→fim
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);  // Posição normal
+    opacity: 0.4;               // Semi-transparente
+  }
+  30% {
+    transform: translateY(-6px); // Salta 6px para cima
+    opacity: 1;                   // Totalmente visível
+  }
+}

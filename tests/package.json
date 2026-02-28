@@ -1,0 +1,14 @@
+{
+  "name": "blip-tests",
+  "version": "1.0.0",
+  "description": "Testes E2E para Blip Risk Analysis",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:ui": "npx playwright test --ui",
+    "test:headed": "npx playwright test --headed",
+    "test:report": "npx playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

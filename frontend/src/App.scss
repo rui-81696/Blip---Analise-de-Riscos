@@ -1,0 +1,140 @@
+/*
+ * ===== App.scss =====
+ * Estilos do componente principal App.jsx.
+ *
+ * Define o layout geral da aplicação:
+ * - Header (cabeçalho) com logo e botão de atualizar
+ * - Main (conteúdo principal) com as secções de métricas, filtros, tabela
+ * - Footer (rodapé) com créditos
+ *
+ * SCSS NESTING (Aninhamento):
+ * O & (ampersand) refere-se à classe pai.
+ * Dentro de .app, o &__header é equivalente a .app__header
+ * Isto segue a metodologia BEM (Block__Element--Modifier)
+ */
+
+// Importar variáveis e mixins SCSS
+@use './styles/variables' as *;
+@use './styles/mixins' as *;
+
+// Bloco principal da aplicação
+.app {
+  min-height: 100vh;       // Ocupa pelo menos toda a altura da janela
+  display: flex;            // Usa flexbox para layout
+  flex-direction: column;   // Empilha header, main e footer verticalmente
+
+  // ─── Header (Cabeçalho fixo no topo) ───
+  &__header {
+    background: $bg-card;                  // Fundo escuro
+    border-bottom: 1px solid $border-color; // Linha separadora
+    padding: $spacing-md $spacing-xl;      // Espaçamento interno
+    position: sticky;                       // Fica "colado" ao topo ao fazer scroll
+    top: 0;                                 // Posição: topo da página
+    z-index: $z-dropdown;                   // Fica à frente de outros elementos
+    backdrop-filter: blur(10px);            // Efeito de vidro fosco (desfoca o que está atrás)
+  }
+
+  // Container do conteúdo do header (limita largura e centra)
+  &__header-content {
+    @include flex-between;    // Logo à esquerda, botões à direita
+    max-width: 1600px;        // Largura máxima
+    margin: 0 auto;           // Centra horizontalmente
+    width: 100%;
+  }
+
+  // Área do logotipo
+  &__logo {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;  // Espaço entre ícone e texto
+  }
+
+  // Ícone do logo (quadrado vermelho com "B")
+  &__logo-icon {
+    width: 40px;
+    height: 40px;
+    background: $primary;              // Fundo vermelho
+    color: white;
+    border-radius: $border-radius-md;  // Cantos arredondados
+    @include flex-center;              // Centra o texto "B" dentro
+    font-weight: 800;
+    font-size: $font-size-xl;
+  }
+
+  // Texto do logo (título + subtítulo)
+  &__logo-text {
+    @include flex-column;  // Empilha título e subtítulo verticalmente
+    line-height: 1.2;
+  }
+
+  &__title {
+    font-size: $font-size-xl;
+    font-weight: 800;
+    letter-spacing: -0.5px;  // Letras ligeiramente mais juntas
+  }
+
+  &__subtitle {
+    font-size: $font-size-xs;
+    color: $text-muted;
+    text-transform: uppercase;  // MAIÚSCULAS
+    letter-spacing: 1px;        // Letras mais espaçadas
+  }
+
+  // Área dos botões de ação do header
+  &__header-actions {
+    display: flex;
+    gap: $spacing-sm;
+  }
+
+  // Botão de atualizar (usa o mixin de botão secundário)
+  &__refresh-btn {
+    @include button-secondary;
+    font-size: $font-size-sm;
+  }
+
+  // ─── Main (Conteúdo Principal) ───
+  &__main {
+    flex: 1;                      // Ocupa todo o espaço disponível entre header e footer
+    max-width: 1600px;
+    margin: 0 auto;               // Centra horizontalmente
+    width: 100%;
+    padding: $spacing-xl;         // Espaçamento interior
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xl;             // Espaço entre secções (métricas, filtros, tabela)
+  }
+
+  // Cada secção dentro do main
+  &__section {
+    width: 100%;
+  }
+
+  // ─── Erro (Mensagem de erro quando a API falha) ───
+  &__error {
+    @include card;                          // Estilo de cartão
+    background: rgba($danger, 0.1);         // Fundo vermelho transparente
+    border-color: $danger;                  // Borda vermelha
+    color: $danger;                         // Texto vermelho
+    @include flex-between;                  // Texto à esquerda, botão à direita
+
+    // Botão "Tentar novamente" dentro do erro
+    button {
+      @include button-secondary;
+      border-color: $danger;
+      color: $danger;
+
+      &:hover {
+        background: rgba($danger, 0.1);
+      }
+    }
+  }
+
+  // ─── Footer (Rodapé) ───
+  &__footer {
+    text-align: center;
+    padding: $spacing-lg;
+    color: $text-muted;            // Texto discreto
+    font-size: $font-size-xs;      // Texto pequeno
+    border-top: 1px solid $border-color; // Linha separadora
+  }
+}

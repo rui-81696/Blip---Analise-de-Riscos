@@ -1,0 +1,116 @@
+/*
+ * ===== _variables.scss =====
+ * Ficheiro de VARIÁVEIS SCSS do projeto.
+ *
+ * O QUE SÃO VARIÁVEIS SCSS?
+ * São como variáveis em JavaScript! Em vez de repetir "#e94560" em 50 sítios,
+ * definimos $primary: #e94560 e usamos $primary em todo o lado.
+ * Se quisermos mudar a cor, mudamos AQUI e atualiza em todo o projeto!
+ *
+ * PORQUE O UNDERSCORE (_) NO NOME?
+ * Em SCSS, ficheiros que começam com _ (underscore) são "partials":
+ * não geram ficheiros CSS próprios, são importados por outros ficheiros.
+ *
+ * CONVENÇÃO DE NOMES:
+ * As variáveis seguem o padrão: $categoria-nome
+ * Ex: $bg-dark (background escuro), $font-size-sm (tamanho de fonte pequeno)
+ *
+ * UNIDADE "rem":
+ * 1rem = 16px (por defeito). É melhor que px porque se adapta
+ * quando o utilizador muda o tamanho de texto no browser.
+ */
+
+// ─── Cores Principais ───
+// Estas são as cores da "marca" da aplicação (vermelho/rosa)
+$primary: #e94560;       // Cor principal (vermelho vibrante)
+$primary-light: #ff6b81; // Versão mais clara (para hover/destaque)
+$primary-dark: #c0392b;  // Versão mais escura
+
+// Cores de fundo (tema escuro/dark mode)
+$bg-dark: #0f0f1a;       // Fundo da página (azul muito escuro, quase preto)
+$bg-card: #1a1a2e;       // Fundo dos cartões/painéis
+$bg-card-hover: #222240; // Fundo quando o rato passa por cima (hover)
+$bg-input: #16213e;      // Fundo dos campos de input
+
+// Cores de texto
+$text-primary: #eaeaea;   // Texto principal (branco suave)
+$text-secondary: #a0a0b0; // Texto secundário (cinza claro)
+$text-muted: #6c6c80;     // Texto discreto (cinza escuro)
+
+// Cores semânticas (cada cor tem um "significado")
+$success: #2ecc71; // Verde = sucesso/positivo
+$warning: #f1c40f; // Amarelo = aviso/atenção
+$danger: #e74c3c;  // Vermelho = erro/perigo
+$info: #3498db;    // Azul = informação
+
+// Cores dos estados das apostas
+$status-pending: #f1c40f; // Pendente (amarelo)
+$status-won: #2ecc71;     // Ganha (verde)
+$status-lost: #e74c3c;    // Perdida (vermelho)
+$status-void: #95a5a6;    // Anulada (cinza)
+
+// Cores dos níveis de risco
+$risk-low: #2ecc71;      // Risco baixo (verde)
+$risk-medium: #f1c40f;   // Risco médio (amarelo)
+$risk-high: #e67e22;     // Risco alto (laranja)
+$risk-critical: #e74c3c; // Risco crítico (vermelho)
+
+// ─── Tipografia (Fontes) ───
+// font-family: lista de fontes por ordem de preferência
+// Se o browser não tiver a primeira, tenta a segunda, etc.
+$font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+// Tamanhos de fonte (escala consistente usando rem)
+$font-size-xs: 0.75rem;   // 12px - Extra pequeno (legends, badges)
+$font-size-sm: 0.875rem;  // 14px - Pequeno (texto de tabela)
+$font-size-base: 1rem;    // 16px - Base (texto normal)
+$font-size-lg: 1.125rem;  // 18px - Grande (títulos de secção)
+$font-size-xl: 1.25rem;   // 20px - Extra grande
+$font-size-2xl: 1.5rem;   // 24px - Duplo extra grande
+$font-size-3xl: 2rem;     // 32px - Triplo extra grande (títulos principais)
+
+// ─── Espaçamento ───
+// Sistema de espaçamento consistente (margens, paddings)
+$spacing-xs: 0.25rem;  // 4px
+$spacing-sm: 0.5rem;   // 8px
+$spacing-md: 1rem;     // 16px
+$spacing-lg: 1.5rem;   // 24px
+$spacing-xl: 2rem;     // 32px
+$spacing-2xl: 3rem;    // 48px
+
+// ─── Bordas ───
+// Raios de canto (border-radius) - cantos arredondados
+$border-radius-sm: 4px;    // Ligeiramente arredondado (badges)
+$border-radius-md: 8px;    // Moderado (inputs, botões)
+$border-radius-lg: 12px;   // Bastante arredondado (cards)
+$border-radius-xl: 16px;   // Muito arredondado (modais, chat)
+$border-color: #2a2a4a;    // Cor das bordas (azul escuro subtil)
+
+// ─── Sombras ───
+// box-shadow: deslocamento-x, deslocamento-y, desfocagem, cor
+$shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);    // Sombra leve
+$shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);    // Sombra média
+$shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.5);  // Sombra forte
+
+// ─── Transições (Animações suaves) ───
+// Definem a DURAÇÃO + tipo de easing das animações CSS
+$transition-fast: 150ms ease;    // Rápida (hover de botões)
+$transition-normal: 250ms ease;  // Normal
+$transition-slow: 400ms ease;    // Lenta (barras de progresso)
+
+// ─── Breakpoints (Pontos de quebra responsivos) ───
+// Definem a largura do ecrã onde o layout muda
+// Usado com @media queries para design responsivo
+$breakpoint-sm: 640px;   // Telemóveis grandes
+$breakpoint-md: 768px;   // Tablets
+$breakpoint-lg: 1024px;  // Portáteis/laptops
+$breakpoint-xl: 1280px;  // Desktops
+$breakpoint-2xl: 1536px; // Ecrãs grandes
+
+// ─── Z-index (Camadas de sobreposição) ───
+// Controla QUE ELEMENTO fica À FRENTE de outros quando se sobrepõem
+// Quanto maior o z-index, mais à frente fica
+$z-dropdown: 100;  // Menus dropdown
+$z-modal: 200;     // Modais/diálogos (chat)
+$z-tooltip: 300;   // Tooltips (dicas)
+$z-toast: 400;     // Notificações toast (sempre no topo)

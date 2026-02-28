@@ -1,0 +1,44 @@
+<!--
+  ===== index.html =====
+  Este é o FICHEIRO HTML principal da aplicação.
+  É o único ficheiro HTML em toda a aplicação (SPA - Single Page Application)!
+
+  O QUE É UMA SPA?
+  Uma SPA (Aplicação de Página Única) carrega UM único HTML
+  e depois o JavaScript (React) gere tudo dinamicamente:
+  muda conteúdo, navegação, etc. sem recarregar a página.
+
+  FLUXO:
+  1. Browser carrega este HTML
+  2. Encontra o <script src="/src/main.jsx">
+  3. O Vite processa o main.jsx e suas dependências
+  4. O React "monta" toda a aplicação dentro da <div id="root">
+-->
+<!DOCTYPE html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Ícone do separador do browser (favicon) -->
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- Meta viewport: torna a página responsive em dispositivos móveis -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Título que aparece no separador do browser -->
+    <title>Blip - Risk Analysis</title>
+    <!-- Descrição para motores de busca (SEO) -->
+    <meta name="description" content="Aplicação Web para análise de risco em apostas desportivas" />
+  </head>
+  <body>
+    <!-- 
+      Esta <div> é onde o React vai "montar" toda a aplicação.
+      O main.jsx procura este id="root" com document.getElementById('root').
+      Tudo o que o React renderiza aparece DENTRO desta div.
+    -->
+    <div id="root"></div>
+    <!-- 
+      Script principal da aplicação.
+      type="module" permite usar import/export (ES Modules).
+      O Vite interceta este script e transforma JSX em JavaScript válido.
+    -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,93 @@
+/*
+ * ===== Pagination.scss =====
+ * Estilos do componente de PAGINAÇÃO.
+ *
+ * A paginação aparece abaixo da tabela e contém:
+ * - Info: "A mostrar 1-25 de 500 registos"
+ * - Controles: botões de página (« 1 2 3 4 5 »)
+ * - Seletor: dropdown para escolher quantos registos por página
+ *
+ * LAYOUT: usa flex-between para distribuir os 3 grupos
+ * ┌──────────────────────────────────────────────┐
+ * │ A mostrar...  │  « 1 2 [3] 4 5 »  │ 25/pág │
+ * └──────────────────────────────────────────────┘
+ */
+
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.pagination {
+  @include flex-between;        // Distribui items nas extremidades
+  flex-wrap: wrap;               // Quebra linha em ecrãs pequenos
+  gap: $spacing-md;              // Espaço entre grupos
+  padding: $spacing-md $spacing-lg;
+  background: $bg-card;
+  border: 1px solid $border-color;
+  border-radius: $border-radius-lg;
+  margin-top: $spacing-md;       // Espaço acima (separa da tabela)
+
+  // Texto informativo ("A mostrar X de Y registos")
+  &__info {
+    color: $text-secondary;
+    font-size: $font-size-sm;
+  }
+
+  // Container dos botões de página
+  &__controls {
+    display: flex;
+    gap: $spacing-xs; // Espaço mínimo entre botões
+  }
+
+  // ─── Botão de página individual ───
+  &__btn {
+    @include button-base;          // Estilos base de botão
+    min-width: 36px;               // Largura mínima (quadrado)
+    height: 36px;
+    padding: $spacing-xs;
+    background: $bg-input;         // Fundo escuro
+    color: $text-secondary;        // Texto cinza
+    border: 1px solid $border-color;
+    font-size: $font-size-sm;
+
+    // Hover (excepto quando desativado)
+    &:hover:not(:disabled) {
+      background: $bg-card-hover;
+      color: $text-primary;
+      border-color: $text-muted;
+    }
+
+    // Botão da página ATIVA (página atual)
+    &--active {
+      background: $primary;      // Fundo vermelho
+      color: white;              // Texto branco
+      border-color: $primary;
+
+      &:hover:not(:disabled) {
+        background: $primary-light;
+        border-color: $primary-light;
+        color: white;
+      }
+    }
+
+    // Botão desativado (ex: «Anterior» na primeira página)
+    &:disabled {
+      opacity: 0.3; // Muito transparente
+    }
+  }
+
+  // ─── Seletor de registos por página ───
+  &__limit {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+
+    // O <select> dentro do seletor de limite
+    select {
+      @include input-base;                    // Estilo base de input
+      padding: $spacing-xs $spacing-sm;       // Padding mais compacto
+      cursor: pointer;
+    }
+  }
+}

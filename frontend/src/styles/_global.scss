@@ -1,0 +1,179 @@
+/*
+ * ===== _global.scss =====
+ * Estilos GLOBAIS da aplicação.
+ *
+ * Este ficheiro contém:
+ * 1. CSS Reset — remove estilos padrão do browser para consistência
+ * 2. Estilos base — aplicados a todos os elementos (body, links, etc.)
+ * 3. Classes utilitárias — classes reutilizáveis (.text-muted, .status-badge, etc.)
+ *
+ * PORQUE UM RESET?
+ * Cada browser (Chrome, Firefox, Safari) aplica estilos padrão diferentes.
+ * O reset "limpa" tudo para que a aplicação pareça igual em todos os browsers.
+ *
+ * METODOLOGIA BEM:
+ * As classes seguem a convenção BEM (Block__Element--Modifier):
+ * - .status-badge (bloco)
+ * - .status-badge--pending (bloco com modificador "pending")
+ */
+
+// ─── CSS Reset ───
+// * seleciona TODOS os elementos da página
+// *::before e *::after selecionam pseudo-elementos
+*,
+*::before,
+*::after {
+  box-sizing: border-box; // Inclui padding e border na largura total (facilita cálculos)
+  margin: 0;              // Remove margens padrão
+  padding: 0;             // Remove padding padrão
+}
+
+// Estilos base do HTML (raiz do documento)
+html {
+  font-size: 16px;                       // 1rem = 16px (base de cálculo)
+  -webkit-font-smoothing: antialiased;   // Suaviza as fontes no Chrome/Safari
+  -moz-osx-font-smoothing: grayscale;    // Suaviza as fontes no Firefox/macOS
+}
+
+// Estilos base do body (corpo da página)
+body {
+  font-family: $font-family;  // Fonte Inter (importada via variáveis)
+  background: $bg-dark;       // Fundo escuro (tema dark)
+  color: $text-primary;       // Texto claro
+  min-height: 100vh;          // Altura mínima = 100% da altura da janela
+  line-height: 1.6;           // Espaçamento entre linhas (1.6x o tamanho da fonte)
+}
+
+// A div #root (onde o React monta a aplicação)
+#root {
+  min-height: 100vh; // Garante que ocupa pelo menos toda a altura da janela
+}
+
+// ─── Links ───
+a {
+  color: $primary;                      // Links na cor principal (vermelho)
+  text-decoration: none;                // Remove sublinhado
+  transition: color $transition-fast;   // Transição suave de cor
+
+  // &:hover = quando o rato passa por cima
+  // & em SCSS refere-se ao elemento pai (neste caso, <a>)
+  &:hover {
+    color: $primary-light; // Fica mais claro
+  }
+}
+
+// ─── Scrollbar Global ───
+// Aplica a scrollbar personalizada ao body (toda a página)
+body {
+  @include custom-scrollbar; // Usa o mixin definido em _mixins.scss
+}
+
+// ─── Classes Utilitárias de Texto ───
+// Classes que podem ser adicionadas a qualquer elemento para mudar a cor do texto
+// Ex: <span className="text-success">+500€</span>
+.text-muted {
+  color: $text-muted;
+}
+
+.text-secondary {
+  color: $text-secondary;
+}
+
+.text-success {
+  color: $success; // Verde
+}
+
+.text-warning {
+  color: $warning; // Amarelo
+}
+
+.text-danger {
+  color: $danger; // Vermelho
+}
+
+.text-info {
+  color: $info; // Azul
+}
+
+// ─── Badges de Estado ───
+// "Badges" são etiquetas coloridas que mostram o estado de uma aposta
+// Usam o padrão BEM: .status-badge--pending, .status-badge--won, etc.
+.status-badge {
+  @include status-badge(null); // Aplica estilos base do mixin
+  display: inline-block;
+
+  // Cada modificador (--) define cor de fundo e texto diferentes
+  // rgba() cria uma cor semi-transparente (15% de opacidade)
+  &--pending {
+    background: rgba($status-pending, 0.15); // Amarelo com 15% opacidade
+    color: $status-pending;                   // Texto amarelo
+  }
+
+  &--won {
+    background: rgba($status-won, 0.15); // Verde transparente
+    color: $status-won;
+  }
+
+  &--lost {
+    background: rgba($status-lost, 0.15); // Vermelho transparente
+    color: $status-lost;
+  }
+
+  &--void {
+    background: rgba($status-void, 0.15); // Cinza transparente
+    color: $status-void;
+  }
+}
+
+// ─── Badges de Risco ───
+// Semelhante aos badges de estado, mas para os níveis de risco
+.risk-badge {
+  @include status-badge(null);
+  display: inline-flex;   // Inline-flex para alinhar ícone + texto
+  align-items: center;
+  gap: 4px;               // Espaço entre ícone e texto
+
+  &--low {
+    background: rgba($risk-low, 0.15); // Verde (risco baixo)
+    color: $risk-low;
+  }
+
+  &--medium {
+    background: rgba($risk-medium, 0.15); // Amarelo (risco médio)
+    color: $risk-medium;
+  }
+
+  &--high {
+    background: rgba($risk-high, 0.15); // Laranja (risco alto)
+    color: $risk-high;
+  }
+
+  &--critical {
+    background: rgba($risk-critical, 0.15); // Vermelho (risco crítico)
+    color: $risk-critical;
+  }
+}
+
+// ─── Loading Spinner (Animação de Carregamento) ───
+// Mostra um círculo a girar enquanto os dados carregam da API
+.loading-spinner {
+  @include flex-center;       // Centra o spinner
+  padding: $spacing-2xl;     // Espaçamento à volta
+
+  &__circle {
+    width: 40px;
+    height: 40px;
+    border: 3px solid $border-color;     // Círculo cinza
+    border-top-color: $primary;           // Topo vermelho (parte visível a girar)
+    border-radius: 50%;                   // Faz o quadrado virar círculo
+    animation: spin 0.8s linear infinite; // Animação: gira 360° a cada 0.8s, infinitamente
+  }
+}
+
+// @keyframes define a animação "spin"
+// "to" é o estado final (volta completa de 360°)
+@keyframes spin {
+  to {
+    transform: rotate(360deg); // Roda 360 graus
+  }
+}

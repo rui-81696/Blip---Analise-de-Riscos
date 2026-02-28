@@ -1,0 +1,25 @@
+{
+  "name": "blip-risk-analysis",
+  "version": "1.0.0",
+  "description": "Blip Risk Analysis - Aplicação Web para análise de risco em apostas desportivas",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start:backend": "cd backend && npm start",
+    "test": "cd tests && npx playwright test",
+    "test:ui": "cd tests && npx playwright test --ui",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../tests && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": ["risk-analysis", "betting", "react", "express", "webllm"],
+  "authors": [
+    "Rui Daniel Ferreira Moreira (81696)",
+    "Rafael Ribeiro Júlio (81132)"
+  ],
+  "license": "ISC"
+}

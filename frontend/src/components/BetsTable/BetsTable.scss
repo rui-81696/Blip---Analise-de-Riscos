@@ -1,0 +1,133 @@
+/*
+ * ===== BetsTable.scss =====
+ * Estilos da TABELA DE APOSTAS.
+ *
+ * A tabela é o componente central da aplicação.
+ * Usa o padrão BEM: .bets-table__th, .bets-table__row, etc.
+ *
+ * ESTRUTURA:
+ * .bets-table           → Container principal (card)
+ *   __wrapper           → Wrapper com scroll horizontal
+ *     __table           → A tabela HTML <table>
+ *       __th            → Cabeçalhos <th> das colunas
+ *       __row           → Linhas <tr> de dados
+ *         __td          → Células <td> individuais
+ *   __loading/__empty   → Estados de carregamento/vazio
+ */
+
+// Importar variáveis e mixins
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.bets-table {
+  @include card;        // Estilo de cartão (fundo, borda, sombra)
+  padding: 0;           // Remove padding do card (a tabela preenche tudo)
+  overflow: hidden;     // Esconde conteúdo que saia dos cantos arredondados
+
+  // Wrapper para scroll horizontal (quando a tabela é mais larga que o ecrã)
+  &__wrapper {
+    overflow-x: auto;          // Permite scroll horizontal
+    @include custom-scrollbar; // Scrollbar personalizada
+  }
+
+  // A tabela HTML
+  &__table {
+    width: 100%;               // Ocupa toda a largura
+    border-collapse: collapse; // Remove espaçamento entre células
+    font-size: $font-size-sm;  // Texto 14px
+  }
+
+  // ─── Cabeçalhos das colunas <th> ───
+  &__th {
+    padding: $spacing-md $spacing-lg;      // Espaçamento interno
+    text-align: left;                       // Texto alinhado à esquerda
+    font-weight: 600;                       // Semi-negrito
+    color: $text-secondary;                 // Cinza claro
+    font-size: $font-size-xs;               // Texto pequeno (12px)
+    text-transform: uppercase;              // MAIÚSCULAS
+    letter-spacing: 0.5px;                  // Espaçamento entre letras
+    background: rgba(0, 0, 0, 0.2);         // Fundo ligeiramente mais escuro
+    border-bottom: 1px solid $border-color; // Linha separadora
+    white-space: nowrap;                    // Não quebra linha
+    user-select: none;                      // Impede seleção de texto ao clicar
+
+    // Modificador: colunas que permitem ordenação
+    &--sortable {
+      cursor: pointer;                     // Cursor "mãozinha" para indicar que é clicável
+      transition: color $transition-fast;
+
+      &:hover {
+        color: $primary; // Fica vermelho ao passar o rato
+      }
+    }
+
+    // Modificador: coluna atualmente usada para ordenar
+    &--active {
+      color: $primary; // Vermelho para indicar ordenação ativa
+    }
+  }
+
+  // Ícone de seta de ordenação (▲ ou ▼)
+  &__sort-icon {
+    margin-left: $spacing-xs;
+    font-size: $font-size-xs;
+  }
+
+  // ─── Linhas de dados <tr> ───
+  &__row {
+    transition: background $transition-fast;
+    border-bottom: 1px solid rgba($border-color, 0.5); // Linha separadora subtil
+
+    // Efeito hover: fundo mais claro ao passar o rato
+    &:hover {
+      background: $bg-card-hover;
+    }
+
+    // :last-child = última linha não tem borda inferior
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  // ─── Células de dados <td> ───
+  &__td {
+    padding: $spacing-sm $spacing-lg;
+    white-space: nowrap; // Não quebra linha
+
+    // Célula do ID (monoespaçado, mais discreta)
+    &--id {
+      color: $text-muted;
+      font-family: monospace;  // Fonte monoespaçada (tipo código)
+      font-size: $font-size-xs;
+    }
+
+    // Célula do evento (corta texto longo com "...")
+    &--event {
+      max-width: 200px;
+      @include truncate; // Adiciona "..." quando o texto é muito longo
+    }
+
+    // Célula do valor (números alinhados)
+    &--amount {
+      font-weight: 600;
+      font-variant-numeric: tabular-nums; // Números com largura fixa (alinham em coluna)
+    }
+
+    // Célula da data
+    &--date {
+      color: $text-secondary;
+      font-size: $font-size-xs;
+    }
+  }
+
+  // ─── Estados de carregamento e vazio ───
+  &__loading,
+  &__empty {
+    @include flex-center;       // Centra conteúdo
+    @include flex-column;       // Empilha verticalmente
+    padding: $spacing-2xl;      // Espaçamento generoso
+    text-align: center;
+    color: $text-secondary;
+    gap: $spacing-sm;
+  }
+}
