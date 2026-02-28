@@ -4,8 +4,8 @@
 
 **UTAD — Licenciatura em Engenharia Informática — Laboratório de Projeto**
 
-- **Rui Daniel Ferreira Moreira** (81696) — Frontend/Design
-- **Rafael Ribeiro Júlio** (81132) — Backend/Integração
+- **Rafael Ribeiro Júlio** (81132) — Frontend/Design
+- **Rui Daniel Ferreira Moreira** (81696) — Backend/Integração
 - **Orientador:** Ricardo Soares
 - **Coorientadores:** António Sousa | Luís Barbosa
 
