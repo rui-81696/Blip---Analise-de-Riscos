@@ -118,8 +118,8 @@ function App() {
    * - className em vez de class (porque "class" é palavra reservada em JS)
    * - Expressões JS dentro de { chaves }
    * - Cada componente deve retornar UM ÚNICO elemento raiz
-   * - Comentários JSX: {/* texto */}
-  /*
+   * - Comentários JSX: {/* texto * /}  (sem espaço antes do /)
+   *
    * "&&" (short-circuit): renderiza o elemento APENAS se a condição for true
    * Ex: {error && <div>...</div>} → só mostra o erro se "error" não for null
    */
