@@ -59,6 +59,12 @@ export default function metricsRouter(db) {
           totalAmount: 0,
           totalProfit: 0,
           totalLoss: 0,
+          closedBets: 0,
+          closedWithProfit: 0,
+          closedWithLoss: 0,
+          winRate: 0,
+          avgProfit: 0,
+          avgLoss: 0,
           riskExposure: 0,
           avgRiskScore: 0,
           bySport: {},
@@ -81,13 +87,24 @@ export default function metricsRouter(db) {
       const wonBets = bets.filter((b) => b.status === 'won');
       // Lucro = para cada aposta ganha: (valor * odds) - valor
       // Ex: aposta de 100€ com odds 3.0 = 300€ - 100€ = 200€ de lucro
-      const totalProfit = wonBets.reduce((sum, b) => sum + (b.amount * b.odds - b.amount), 0);
+      const totalProfit = wonBets.reduce((sum, b) => sum + (b.actualProfit || b.amount * b.odds - b.amount), 0);
 
       /* ─── PERDA ─── */
       // Filtrar apostas perdidas ("lost")
       const lostBets = bets.filter((b) => b.status === 'lost');
       // Perda = soma dos valores apostados nas apostas perdidas
-      const totalLoss = lostBets.reduce((sum, b) => sum + b.amount, 0);
+      const totalLoss = lostBets.reduce((sum, b) => sum + Math.abs(b.actualProfit || -b.amount), 0);
+
+      /* ─── APOSTAS ENCERRADAS ─── */
+      // Apostas encerradas são aquelas com status 'won' ou 'lost'
+      const closedBets = bets.filter((b) => b.status === 'won' || b.status === 'lost');
+      const closedWithProfit = closedBets.filter((b) => b.status === 'won');
+      const closedWithLoss = closedBets.filter((b) => b.status === 'lost');
+      
+      /* ─── ESTATÍSTICAS DE GANHO/PERDA ─── */
+      const winRate = closedBets.length > 0 ? Math.round((closedWithProfit.length / closedBets.length) * 100) : 0;
+      const avgProfit = closedWithProfit.length > 0 ? closedWithProfit.reduce((sum, b) => sum + (b.actualProfit || 0), 0) / closedWithProfit.length : 0;
+      const avgLoss = closedWithLoss.length > 0 ? closedWithLoss.reduce((sum, b) => sum + Math.abs(b.actualProfit || 0), 0) / closedWithLoss.length : 0;
 
       /* ─── EXPOSIÇÃO AO RISCO ─── */
       // Apostas pendentes representam risco pois o resultado é desconhecido
@@ -154,6 +171,12 @@ export default function metricsRouter(db) {
         totalAmount: Math.round(totalAmount * 100) / 100,
         totalProfit: Math.round(totalProfit * 100) / 100,
         totalLoss: Math.round(totalLoss * 100) / 100,
+        closedBets: closedBets.length,
+        closedWithProfit: closedWithProfit.length,
+        closedWithLoss: closedWithLoss.length,
+        winRate,
+        avgProfit: Math.round(avgProfit * 100) / 100,
+        avgLoss: Math.round(avgLoss * 100) / 100,
         riskExposure: Math.round(riskExposure * 100) / 100,
         avgRiskScore: Math.round(avgRiskScore * 10) / 10,
         bySport,

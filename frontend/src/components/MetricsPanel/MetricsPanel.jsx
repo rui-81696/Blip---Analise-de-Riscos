@@ -5,7 +5,8 @@
  * Exibe cards com estatísticas gerais das apostas:
  * - Total de apostas
  * - Volume total apostado (€)
- * - Lucro e perda totais
+ * - Lucro e perda totais (CLICÁVEIS)
+ * - Apostas encerradas
  * - Exposição ao risco
  * - Risco médio
  * - Distribuição por nível de risco (barras de progresso)
@@ -15,10 +16,12 @@
  * - Arrays de objetos: os cards são definidos num array e renderizados com .map()
  * - Cálculos inline: percentagens calculadas diretamente no JSX
  * - Object.entries(): converte um objeto em array de pares [chave, valor]
+ * - useState: gerencia estado do modal (aberto/fechado)
  */
 
-// Importar funções de formatação (moeda e números)
+import { useState } from 'react';
 import { formatCurrency, formatNumber } from '../../utils/formatters';
+import ProfitLossModal from '../ProfitLossModal/ProfitLossModal';
 import './MetricsPanel.scss';
 
 /**
@@ -29,6 +32,9 @@ import './MetricsPanel.scss';
  * @param {boolean} loading - Se as métricas estão a ser carregadas
  */
 export default function MetricsPanel({ metrics, loading }) {
+  // Estado para controlar qual modal está aberto (null, 'profit', ou 'loss')
+  const [modalOpen, setModalOpen] = useState(null);
+
   // Se está a carregar OU não há métricas ainda, mostra mensagem de loading
   if (loading || !metrics) {
     return (
@@ -40,127 +46,173 @@ export default function MetricsPanel({ metrics, loading }) {
 
   /*
    * ─── DEFINIÇÃO DOS CARDS ───
-   * Cada card é um objeto com:
-   * - label: texto descritivo
-   * - value: valor formatado para exibição
-   * - icon: emoji como ícone visual
-   * - color: classe CSS para a cor da borda lateral
-   *
-   * O último card tem uma expressão ternária encadeada para escolher a cor
-   * do risco médio: vermelho se >50, amarelo se >25, verde caso contrário.
+   * Cada card é um objeto com propriedades para renderização e interação.
+   * Novos campos:
+   * - clickable: se o card é clicável (true para lucro/perda)
+   * - onClick: função a executar quando clicado
    */
-  const cards = [
+  const primaryCards = [
     {
       label: 'Total de Apostas',
-      value: formatNumber(metrics.totalBets),   // Ex: "1 500"
-      icon: '🎰',
-      color: 'info',     // Azul
+      value: formatNumber(metrics.totalBets),
+      subtext: 'Todas as apostas',
+      icon: '🎲',
+      color: 'info',
+      clickable: false,
+    },
+    {
+      label: 'Apostas Encerradas',
+      value: formatNumber(metrics.closedBets || 0),
+      subtext: `${metrics.closedWithProfit || 0} ganhas, ${metrics.closedWithLoss || 0} perdidas`,
+      icon: '✅',
+      color: 'info',
+      clickable: false,
     },
     {
       label: 'Volume Total',
-      value: formatCurrency(metrics.totalAmount), // Ex: "500 000,00 €"
+      value: formatCurrency(metrics.totalAmount),
+      subtext: 'Valor apostado',
       icon: '💰',
       color: 'info',
+      clickable: false,
     },
+  ];
+
+  const profitLossCards = [
     {
       label: 'Lucro Total',
       value: formatCurrency(metrics.totalProfit),
+      subtext: `Taxa vitória: ${metrics.winRate || 0}%`,
       icon: '📈',
-      color: 'success',  // Verde
+      color: 'success',
+      clickable: true,
+      onClick: () => setModalOpen('profit'),
     },
     {
       label: 'Perda Total',
       value: formatCurrency(metrics.totalLoss),
+      subtext: `Média por derrota: €${(metrics.avgLoss || 0).toFixed(2)}`,
       icon: '📉',
-      color: 'danger',   // Vermelho
-    },
-    {
-      label: 'Exposição ao Risco',
-      value: formatCurrency(metrics.riskExposure),
-      icon: '⚠️',
-      color: 'warning',  // Amarelo
-    },
-    {
-      label: 'Risco Médio',
-      value: `${metrics.avgRiskScore}/100`,      // Ex: "42/100"
-      icon: '🎯',
-      // Ternário encadeado: >50 = vermelho, >25 = amarelo, caso contrário = verde
-      color: metrics.avgRiskScore > 50 ? 'danger' : metrics.avgRiskScore > 25 ? 'warning' : 'success',
+      color: 'danger',
+      clickable: true,
+      onClick: () => setModalOpen('loss'),
     },
   ];
 
-  return (
-    <div className="metrics-panel">
-      <h3 className="metrics-panel__title">Métricas de Risco</h3>
+  const riskCards = [
+    {
+      label: 'Exposição ao Risco',
+      value: formatCurrency(metrics.riskExposure),
+      subtext: `${metrics.byStatus?.pending?.count || 0} apostas pendentes`,
+      icon: '⚠️',
+      color: 'warning',
+      clickable: false,
+    },
+    {
+      label: 'Risco Médio',
+      value: `${Math.round(metrics.avgRiskScore)}/100`,
+      subtext: metrics.avgRiskScore > 50 ? 'Risco Alto ⚠️' : metrics.avgRiskScore > 25 ? 'Risco Médio' : 'Risco Baixo ✓',
+      icon: '🎯',
+      color: metrics.avgRiskScore > 50 ? 'danger' : metrics.avgRiskScore > 25 ? 'warning' : 'success',
+      clickable: false,
+    },
+  ];
 
-      {/* ─── GRELHA DE CARDS ─── */}
-      {/* CSS Grid distribui os cards automaticamente em colunas responsive */}
-      <div className="metrics-panel__grid">
-        {/*
-         * .map() transforma cada card do array num elemento JSX.
-         * Usa o index como key (aceitável porque esta lista não muda de ordem).
-         *
-         * Template literal na className: metrics-panel__card--${card.color}
-         * aplica a cor correta via CSS (ex: --success = borda verde).
-         */}
-        {cards.map((card, index) => (
-          <div key={index} className={`metrics-panel__card metrics-panel__card--${card.color}`}>
-            <div className="metrics-panel__card-icon">{card.icon}</div>
-            <div className="metrics-panel__card-content">
-              <span className="metrics-panel__card-value">{card.value}</span>
-              <span className="metrics-panel__card-label">{card.label}</span>
-            </div>
-          </div>
-        ))}
+  // Renderizar um card individual
+  const renderCard = (card, index) => (
+    <div
+      key={index}
+      className={`metrics-panel__card metrics-panel__card--${card.color} ${card.clickable ? 'metrics-panel__card--clickable' : ''}`}
+      onClick={card.onClick}
+      role={card.clickable ? 'button' : undefined}
+      tabIndex={card.clickable ? 0 : undefined}
+    >
+      <div className="metrics-panel__card-icon">{card.icon}</div>
+      <div className="metrics-panel__card-content">
+        <span className="metrics-panel__card-label">{card.label}</span>
+        <span className="metrics-panel__card-value">{card.value}</span>
+        <span className="metrics-panel__card-subtext">{card.subtext}</span>
       </div>
+      {card.clickable && <div className="metrics-panel__card-hint">Clica para detalhes →</div>}
+    </div>
+  );
 
-      {/* ─── DISTRIBUIÇÃO DE RISCO (barras de progresso) ─── */}
-      {/* Só mostra se a distribuição existir nos dados (&&) */}
-      {metrics.riskDistribution && (
-        <div className="metrics-panel__distribution">
-          <h4 className="metrics-panel__subtitle">Distribuição de Risco</h4>
-          <div className="metrics-panel__bars">
-            {/*
-             * Object.entries(metrics.riskDistribution) converte:
-             * { low: 100, medium: 200, high: 150, critical: 50 }
-             * em:
-             * [['low', 100], ['medium', 200], ['high', 150], ['critical', 50]]
-             *
-             * Depois .map() cria uma barra para cada nível com a percentagem calculada.
-             */}
-            {Object.entries(metrics.riskDistribution).map(([level, count]) => {
-              // Calcular a percentagem que este nível representa do total
-              const total = metrics.totalBets || 1; // || 1 evita divisão por zero
-              const percentage = Math.round((count / total) * 100);
+  return (
+    <>
+      <div className="metrics-panel">
+        <h3 className="metrics-panel__title">Métricas de Risco</h3>
 
-              // Dicionário para traduzir os níveis
-              const labels = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
-
-              return (
-                <div key={level} className="metrics-panel__bar-group">
-                  {/* Cabeçalho da barra: label + contagem */}
-                  <div className="metrics-panel__bar-header">
-                    <span className={`metrics-panel__bar-label risk-badge risk-badge--${level}`}>
-                      {labels[level]}
-                    </span>
-                    <span className="metrics-panel__bar-value">
-                      {count} ({percentage}%)
-                    </span>
-                  </div>
-                  {/* A barra de progresso em si */}
-                  {/* O width é controlado inline via style={{ width: `${percentage}%` }} */}
-                  <div className="metrics-panel__bar-track">
-                    <div
-                      className={`metrics-panel__bar-fill metrics-panel__bar-fill--${level}`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+        {/* ─── SECÇÃO 1: CARDS PRINCIPAIS ─── */}
+        <div className="metrics-panel__section">
+          <h4 className="metrics-panel__section-title">Visão Geral</h4>
+          <div className="metrics-panel__grid">
+            {primaryCards.map((card, index) => renderCard(card, index))}
           </div>
         </div>
-      )}
-    </div>
+
+        {/* ─── SECÇÃO 2: LUCRO E PERDA (CLICÁVEL) ─── */}
+        <div className="metrics-panel__section">
+          <h4 className="metrics-panel__section-title">Resultados Financeiros</h4>
+          <div className="metrics-panel__grid metrics-panel__grid--2col">
+            {profitLossCards.map((card, index) => renderCard(card, index))}
+          </div>
+        </div>
+
+        {/* ─── SECÇÃO 3: RISCO ─── */}
+        <div className="metrics-panel__section">
+          <h4 className="metrics-panel__section-title">Análise de Risco</h4>
+          <div className="metrics-panel__grid metrics-panel__grid--2col">
+            {riskCards.map((card, index) => renderCard(card, index))}
+          </div>
+        </div>
+
+        {/* ─── DISTRIBUIÇÃO DE RISCO (barras de progresso) ─── */}
+        {metrics.riskDistribution && (
+          <div className="metrics-panel__distribution">
+            <h4 className="metrics-panel__subtitle">Distribuição por Nível de Risco</h4>
+            <div className="metrics-panel__bars">
+              {Object.entries(metrics.riskDistribution).map(([level, count]) => {
+                const total = metrics.totalBets || 1;
+                const percentage = Math.round((count / total) * 100);
+                const labels = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
+
+                return (
+                  <div key={level} className="metrics-panel__bar-group">
+                    <div className="metrics-panel__bar-header">
+                      <span className={`metrics-panel__bar-label risk-badge risk-badge--${level}`}>
+                        {labels[level]}
+                      </span>
+                      <span className="metrics-panel__bar-value">
+                        {count} ({percentage}%)
+                      </span>
+                    </div>
+                    <div className="metrics-panel__bar-track">
+                      <div
+                        className={`metrics-panel__bar-fill metrics-panel__bar-fill--${level}`}
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal de Lucro/Perda */}
+      <ProfitLossModal
+        isOpen={modalOpen === 'profit'}
+        onClose={() => setModalOpen(null)}
+        type="profit"
+        metrics={metrics}
+      />
+      <ProfitLossModal
+        isOpen={modalOpen === 'loss'}
+        onClose={() => setModalOpen(null)}
+        type="loss"
+        metrics={metrics}
+      />
+    </>
   );
 }

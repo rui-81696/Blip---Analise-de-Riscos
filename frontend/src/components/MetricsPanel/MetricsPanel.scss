@@ -53,41 +53,82 @@
     @include respond-to(xl) {
       grid-template-columns: repeat(3, 1fr);
     }
+
+    // Variação: 2 colunas apenas
+    &--2col {
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+
+      @include respond-to(xl) {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  }
+
+  // Secção temática de cards
+  &__section {
+    margin-bottom: $spacing-xl;
+
+    &-title {
+      font-size: $font-size-sm;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: $text-secondary;
+      margin-bottom: $spacing-md;
+      padding-bottom: $spacing-sm;
+      border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+    }
   }
 
   // ─── Card individual de métrica ───
   &__card {
     display: flex;
-    align-items: center;
-    gap: $spacing-md;
+    flex-direction: column;
+    gap: $spacing-sm;
     padding: $spacing-md;
     border-radius: $border-radius-md;
-    background: rgba(0, 0, 0, 0.2);  // Fundo semi-transparente
+    background: rgba(255, 255, 255, 0.5);
     border: 1px solid $border-color;
-    // Anima transform E box-shadow ao hover
-    transition: transform $transition-fast, box-shadow $transition-fast;
+    transition: transform $transition-fast, box-shadow $transition-fast, background $transition-fast;
 
     // Efeito hover: sobe 2px e ganha sombra (efeito "elevação")
     &:hover {
       transform: translateY(-2px);
       box-shadow: $shadow-md;
+      background: rgba(255, 255, 255, 0.8);
     }
 
-    // Modificadores: borda esquerda colorida indica o tipo de card
+    // Variação: card clicável
+    &--clickable {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover {
+        transform: translateY(-4px);
+        box-shadow: $shadow-lg;
+      }
+
+      &:focus {
+        outline: 2px solid $info;
+        outline-offset: 2px;
+      }
+    }
+
+    // Modificadores: borda superior colorida indica o tipo de card
     &--success {
-      border-left: 3px solid $success; // Verde (lucro)
+      border-top: 3px solid $success; // Verde (lucro)
     }
 
     &--danger {
-      border-left: 3px solid $danger; // Vermelho (perdas)
+      border-top: 3px solid $danger; // Vermelho (perdas)
     }
 
     &--warning {
-      border-left: 3px solid $warning; // Amarelo (atenção)
+      border-top: 3px solid $warning; // Amarelo (atenção)
     }
 
     &--info {
-      border-left: 3px solid $info; // Azul (informação)
+      border-top: 3px solid $info; // Azul (informação)
     }
   }
 
@@ -101,19 +142,35 @@
     @include flex-column;
   }
 
-  // Valor numérico (ex: "1.250")
-  &__card-value {
-    font-size: $font-size-lg;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums; // Números alinhados em coluna
-  }
-
   // Etiqueta descritiva (ex: "TOTAL APOSTAS")
   &__card-label {
     font-size: $font-size-xs;
     color: $text-secondary;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    margin-bottom: $spacing-xs;
+  }
+
+  // Valor numérico (ex: "1.250")
+  &__card-value {
+    font-size: $font-size-2xl;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums; // Números alinhados em coluna
+    color: $text-primary;
+  }
+
+  // Subtexto adicional (ex: "Taxa vitória: 45%")
+  &__card-subtext {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+  }
+
+  // Dica de clique para cards interativos
+  &__card-hint {
+    font-size: 11px;
+    color: $info;
+    margin-top: $spacing-xs;
+    font-weight: 500;
   }
 
   // ─── Secção de Distribuição de Risco (barras) ───

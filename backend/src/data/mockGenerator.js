@@ -190,7 +190,7 @@ function randomDate(daysBack = 30) {
  *
  * @param {object} options - Opções de geração
  * @param {number} options.daysBack - Dias no passado para a data (por defeito: 30)
- * @returns {object} Objeto de aposta com id, userId, sport, event, amount, odds, status, riskScore, createdAt
+ * @returns {object} Objeto de aposta com id, userId, sport, event, amount, odds, status, riskScore, createdAt, potentialProfit, actualProfit, prediction, closedAt
  */
 export function generateSingleBet(options = {}) {
   const { daysBack = 30 } = options;
@@ -198,13 +198,45 @@ export function generateSingleBet(options = {}) {
   // Escolher dados aleatórios
   const sport = randomChoice(SPORTS);
   const event = randomChoice(EVENTS[sport]); // Evento do desporto escolhido
+  const createdAt = randomDate(daysBack);
 
   // Gerar valores numéricos aleatórios
   // Math.round(... * 100) / 100 arredonda a 2 casas decimais
-  const amount = Math.round(randomBetween(5, 10000) * 100) / 100;   // 5€ a 10 000€
-  const odds = Math.round(randomBetween(1.01, 25.0) * 100) / 100;    // Odds de 1.01 a 25.00
-  const status = randomChoice(STATUSES);
+  const amount = Math.round(randomBetween(10, 5000) * 100) / 100;    // 10€ a 5 000€ (mais realista)
+  const odds = Math.round(randomBetween(1.05, 15.0) * 100) / 100;     // Odds de 1.05 a 15.00 (mais realista)
+  
+  // Determinar status com probabilidades mais realistas
+  // 60% pending, 25% won, 12% lost, 3% void
+  const rand = Math.random();
+  const status = rand < 0.6 ? 'pending' : rand < 0.85 ? 'won' : rand < 0.97 ? 'lost' : 'void';
+  
   const riskScore = calculateRiskScore(amount, odds, status);
+  
+  // Calcular ganho potencial (o que ganharia se vencesse)
+  const potentialProfit = Math.round((amount * (odds - 1)) * 100) / 100;
+  
+  // Calcular ganho/perda real baseado no status
+  let actualProfit = 0;
+  let closedAt = null;
+  let prediction = null;
+  
+  if (status === 'won') {
+    // Ganhou a aposta
+    actualProfit = potentialProfit;
+    prediction = 'win';
+    closedAt = new Date(new Date(createdAt).getTime() + randomBetween(1, 5) * 24 * 60 * 60 * 1000).toISOString();
+  } else if (status === 'lost') {
+    // Perdeu a aposta
+    actualProfit = -amount;
+    prediction = 'loss';
+    closedAt = new Date(new Date(createdAt).getTime() + randomBetween(1, 5) * 24 * 60 * 60 * 1000).toISOString();
+  } else if (status === 'void') {
+    // Aposta anulada (money devolvido)
+    actualProfit = 0;
+    prediction = Math.random() > 0.5 ? 'win' : 'loss';
+    closedAt = new Date(new Date(createdAt).getTime() + randomBetween(1, 3) * 24 * 60 * 60 * 1000).toISOString();
+  }
+  // Para 'pending' os valores preditos vs atuais podem diferir
 
   // Construir e devolver o objeto de aposta
   return {
@@ -216,7 +248,11 @@ export function generateSingleBet(options = {}) {
     odds,                             // Ex: 3.50
     status,                           // Ex: "pending"
     riskScore,                        // Ex: 65
-    createdAt: randomDate(daysBack),  // Ex: "2026-02-15T08:30:00.000Z"
+    createdAt,                        // Ex: "2026-02-15T08:30:00.000Z"
+    potentialProfit,                  // Quanto ganharia se vencesse
+    actualProfit,                     // Ganho/perda real
+    prediction,                       // Previsão: 'win' ou 'loss'
+    closedAt,                         // Data de encerramento (null se pending)
   };
 }
 
