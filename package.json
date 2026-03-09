@@ -16,10 +16,19 @@
   "devDependencies": {
     "concurrently": "^9.1.2"
   },
-  "keywords": ["risk-analysis", "betting", "react", "express", "webllm"],
+  "keywords": [
+    "risk-analysis",
+    "betting",
+    "react",
+    "express",
+    "webllm"
+  ],
   "authors": [
     "Rui Daniel Ferreira Moreira (81696)",
     "Rafael Ribeiro Júlio (81132)"
   ],
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "copilot": "^0.0.2"
+  }
 }
