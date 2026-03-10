@@ -20,9 +20,14 @@
  */
 
 import { useState } from 'react';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js';
+import { Doughnut, Bar } from 'react-chartjs-2';
 import { formatCurrency, formatNumber } from '../../utils/formatters';
 import ProfitLossModal from '../ProfitLossModal/ProfitLossModal';
 import './MetricsPanel.scss';
+
+// Registar componentes Chart.js
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
 /**
  * Componente MetricsPanel
@@ -137,6 +142,72 @@ export default function MetricsPanel({ metrics, loading }) {
     </div>
   );
 
+  // Dados para o gráfico de lucro
+  const profitChartData = {
+    labels: ['Lucro', 'Apostado'],
+    datasets: [
+      {
+        data: [
+          Math.max(0, metrics.totalProfit),
+          Math.max(0, metrics.totalAmount - Math.max(0, metrics.totalProfit))
+        ],
+        backgroundColor: ['rgba(46, 204, 113, 0.7)', 'rgba(46, 204, 113, 0.2)'],
+        borderColor: ['#2ecc71', '#2ecc71'],
+        borderWidth: 2,
+        hoverOffset: 4,
+      },
+    ],
+  };
+
+  // Dados para o gráfico de perda
+  const lossChartData = {
+    labels: ['Perda', 'Apostado'],
+    datasets: [
+      {
+        data: [
+          Math.max(0, metrics.totalLoss),
+          Math.max(0, metrics.totalAmount - Math.max(0, metrics.totalLoss))
+        ],
+        backgroundColor: ['rgba(231, 76, 60, 0.7)', 'rgba(231, 76, 60, 0.2)'],
+        borderColor: ['#e74c3c', '#e74c3c'],
+        borderWidth: 2,
+        hoverOffset: 4,
+      },
+    ],
+  };
+
+  // Opções comuns para os gráficos
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: '#a0a0b0',
+          padding: 15,
+          font: {
+            size: 12,
+            weight: 500,
+          },
+        },
+      },
+      tooltip: {
+        backgroundColor: 'rgba(31, 31, 47, 0.95)',
+        titleColor: '#eaeaea',
+        bodyColor: '#eaeaea',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderWidth: 1,
+        padding: 12,
+        callbacks: {
+          label: function(context) {
+            return formatCurrency(context.parsed);
+          },
+        },
+      },
+    },
+  };
+
   return (
     <>
       <div className="metrics-panel">
@@ -155,6 +226,22 @@ export default function MetricsPanel({ metrics, loading }) {
           <h4 className="metrics-panel__section-title">Resultados Financeiros</h4>
           <div className="metrics-panel__grid metrics-panel__grid--2col">
             {profitLossCards.map((card, index) => renderCard(card, index))}
+          </div>
+
+          {/* Gráficos de Lucro e Perda */}
+          <div className="metrics-panel__charts">
+            <div className="metrics-panel__chart-container">
+              <h5 className="metrics-panel__chart-title">Evolução de Lucros</h5>
+              <div className="metrics-panel__chart-box metrics-panel__chart-box--success">
+                <Doughnut data={profitChartData} options={chartOptions} />
+              </div>
+            </div>
+            <div className="metrics-panel__chart-container">
+              <h5 className="metrics-panel__chart-title">Evolução de Perdas</h5>
+              <div className="metrics-panel__chart-box metrics-panel__chart-box--danger">
+                <Doughnut data={lossChartData} options={chartOptions} />
+              </div>
+            </div>
           </div>
         </div>
 

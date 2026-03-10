@@ -117,18 +117,38 @@
     // Modificadores: borda superior colorida indica o tipo de card
     &--success {
       border-top: 3px solid $success; // Verde (lucro)
+      background: linear-gradient(135deg, rgba(46, 204, 113, 0.15) 0%, rgba(46, 204, 113, 0.05) 100%);
+
+      &:hover {
+        background: linear-gradient(135deg, rgba(46, 204, 113, 0.25) 0%, rgba(46, 204, 113, 0.15) 100%);
+      }
     }
 
     &--danger {
       border-top: 3px solid $danger; // Vermelho (perdas)
+      background: linear-gradient(135deg, rgba(231, 76, 60, 0.15) 0%, rgba(231, 76, 60, 0.05) 100%);
+
+      &:hover {
+        background: linear-gradient(135deg, rgba(231, 76, 60, 0.25) 0%, rgba(231, 76, 60, 0.15) 100%);
+      }
     }
 
     &--warning {
       border-top: 3px solid $warning; // Amarelo (atenção)
+      background: linear-gradient(135deg, rgba(241, 196, 15, 0.15) 0%, rgba(241, 196, 15, 0.05) 100%);
+
+      &:hover {
+        background: linear-gradient(135deg, rgba(241, 196, 15, 0.25) 0%, rgba(241, 196, 15, 0.15) 100%);
+      }
     }
 
     &--info {
       border-top: 3px solid $info; // Azul (informação)
+      background: linear-gradient(135deg, rgba(52, 152, 219, 0.15) 0%, rgba(52, 152, 219, 0.05) 100%);
+
+      &:hover {
+        background: linear-gradient(135deg, rgba(52, 152, 219, 0.25) 0%, rgba(52, 152, 219, 0.15) 100%);
+      }
     }
   }
 
@@ -248,5 +268,71 @@
     @include flex-center;
     padding: $spacing-xl;
     color: $text-muted;
+  }
+
+  // ─── Container de Gráficos ───
+  &__charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: $spacing-lg;
+    margin-top: $spacing-xl;
+    padding-top: $spacing-lg;
+    border-top: 1px solid $border-color;
+
+    @include respond-to(xl) {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  // Container individual do gráfico
+  &__chart-container {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+  }
+
+  // Título do gráfico
+  &__chart-title {
+    font-size: $font-size-sm;
+    font-weight: 600;
+    color: $text-primary;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  // Box que envolve o gráfico (com fundo subtil)
+  &__chart-box {
+    padding: $spacing-md;
+    border-radius: $border-radius-md;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid $border-color;
+    position: relative;
+    height: 300px;
+
+    // Variações de cor de fundo
+    &--success {
+      border-left: 4px solid $success;
+      background: linear-gradient(135deg, rgba(46, 204, 113, 0.08) 0%, rgba(26, 26, 46, 0.8) 100%);
+    }
+
+    &--danger {
+      border-left: 4px solid $danger;
+      background: linear-gradient(135deg, rgba(231, 76, 60, 0.08) 0%, rgba(26, 26, 46, 0.8) 100%);
+    }
+
+    &--warning {
+      border-left: 4px solid $warning;
+      background: linear-gradient(135deg, rgba(241, 196, 15, 0.08) 0%, rgba(26, 26, 46, 0.8) 100%);
+    }
+
+    &--info {
+      border-left: 4px solid $info;
+      background: linear-gradient(135deg, rgba(52, 152, 219, 0.08) 0%, rgba(26, 26, 46, 0.8) 100%);
+    }
+
+    // Canvas do Chart.js dentro do box
+    canvas {
+      max-height: 100%;
+    }
   }
 }
