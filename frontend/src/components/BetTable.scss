@@ -1,0 +1,92 @@
+.bet-table-wrapper {
+  width: 100%;
+  max-height: 70vh;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid #333;
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+
+    th,
+    td {
+      padding: 6px 12px;
+      text-align: left;
+      border-bottom: 1px solid #2a2a2a;
+      white-space: nowrap;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #1a1a1a;
+      font-weight: 600;
+      color: #aaa;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+    }
+
+    tr {
+      &:hover {
+        background: #2a2a3a;
+      }
+
+      &.new-bet {
+        animation: flash 0.6s ease-out;
+      }
+    }
+
+    .sport {
+      color: #64b5f6;
+      font-weight: 500;
+    }
+
+    .odd {
+      color: #ffd54f;
+      font-weight: 600;
+    }
+
+    .stake {
+      color: #81c784;
+      font-weight: 500;
+    }
+  }
+}
+
+@keyframes flash {
+  from {
+    background: rgba(100, 181, 246, 0.15);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.stats-bar {
+  display: flex;
+  gap: 24px;
+  padding: 12px 0;
+  font-size: 0.85rem;
+  color: #aaa;
+
+  span {
+    strong {
+      color: #fff;
+    }
+  }
+
+  .status {
+    &.open {
+      color: #81c784;
+    }
+    &.closed {
+      color: #e57373;
+    }
+    &.connecting {
+      color: #ffd54f;
+    }
+  }
+}
