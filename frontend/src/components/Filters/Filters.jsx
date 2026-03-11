@@ -2,83 +2,40 @@
  * ===== Filters.jsx =====
  * COMPONENTE: Painel de Filtros
  *
- * Permite ao utilizador filtrar as apostas por:
+ * Permite filtrar apostas por:
  * - Pesquisa geral (texto livre)
- * - Desporto (dropdown/select)
- * - Estado (dropdown/select)
- * - Intervalo de valor (mín/máx em €)
- * - Intervalo de risco (mín/máx 0-100)
- * - Intervalo de datas (de/até)
+ * - Desporto, Tipo de aposta (dropdowns)
+ * - Intervalo de stake (€) e odds
+ * - Intervalo de datas
  *
- * CONCEITO IMPORTANTE - Estado local vs Estado global:
- * Este componente tem o seu PRÓPRIO estado local (localFilters) para guardar
- * o que o user está a preencher. Só quando clica "Aplicar" é que os filtros
- * são enviados ao componente pai (App.jsx) via callback onFilterChange.
- * Isto evita que cada letra que o user escreve dispare um pedido à API.
- *
- * CONCEITO: Inputs controlados (Controlled Components)
- * Em React, os inputs são "controlados": o valor exibido vem do estado,
- * e quando o user escreve, o onChange atualiza o estado, que redesenha o input.
- * Fluxo: User escreve → onChange → setLocalFilters → React redesenha → input mostra novo valor
+ * Os filtros são locais até o utilizador clicar "Aplicar".
  */
 
-// useState para gerir o estado local dos filtros
 import { useState } from 'react';
-
-// Função de tradução de desportos (inglês → português)
-import { translateSport } from '../../utils/formatters';
-
-// Estilos específicos deste componente
+import { translateSport, translateBetType } from '../../utils/formatters';
 import './Filters.scss';
 
-// ─── CONSTANTES ───
-// Arrays com os valores possíveis para os dropdowns (selects)
-const SPORTS = ['football', 'basketball', 'tennis', 'hockey', 'baseball', 'volleyball'];
-const STATUSES = ['pending', 'won', 'lost', 'void'];
-// Dicionário de tradução dos estados para o dropdown
-const STATUS_LABELS = { pending: 'Pendente', won: 'Ganhou', lost: 'Perdeu', void: 'Anulada' };
+const SPORTS = ['Football', 'Basketball', 'Tennis', 'Hockey', 'Baseball', 'Volleyball'];
+const BET_TYPES = ['Win', 'Over/Under', 'Both Teams to Score', 'Handicap'];
 
-/**
- * Componente Filters
- *
- * Props:
- * @param {object} filters - Filtros ativos vindos do componente pai
- * @param {function} onFilterChange - Callback para aplicar filtros (envia para App.jsx)
- * @param {function} onClear - Callback para limpar filtros
- */
 export default function Filters({ filters, onFilterChange, onClear }) {
-  /*
-   * Estado LOCAL dos filtros.
-   * É inicializado com os filtros vindos do pai (se existirem) ou strings vazias.
-   * filters.sport || '' significa: usa filters.sport SE existir, senão usa string vazia.
-   */
   const [localFilters, setLocalFilters] = useState({
     sport: filters.sport || '',
-    status: filters.status || '',
-    minAmount: filters.minAmount || '',
-    maxAmount: filters.maxAmount || '',
-    minRisk: filters.minRisk || '',
-    maxRisk: filters.maxRisk || '',
+    betType: filters.betType || '',
+    selection: filters.selection || '',
+    minStake: filters.minStake || '',
+    maxStake: filters.maxStake || '',
+    minOdd: filters.minOdd || '',
+    maxOdd: filters.maxOdd || '',
     dateFrom: filters.dateFrom || '',
     dateTo: filters.dateTo || '',
     search: filters.search || '',
   });
 
-  /**
-   * Atualiza um campo específico no estado local dos filtros.
-   * Usa "computed property names" [key] para definir o nome da propriedade dinamicamente.
-   * Ex: handleChange('sport', 'football') → { ...prev, sport: 'football' }
-   */
   const handleChange = (key, value) => {
     setLocalFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  /**
-   * Quando o user clica "Aplicar":
-   * 1. Percorre todos os filtros locais
-   * 2. Remove os que estão vazios (não faz sentido enviar sport: '' à API)
-   * 3. Envia os filtros "limpos" ao componente pai via callback
-   */
   const handleApply = () => {
     const cleanFilters = {};
     Object.entries(localFilters).forEach(([key, value]) => {
@@ -86,39 +43,31 @@ export default function Filters({ filters, onFilterChange, onClear }) {
         cleanFilters[key] = value;
       }
     });
-    onFilterChange(cleanFilters); // Envia ao App.jsx que dispara nova busca à API
+    onFilterChange(cleanFilters);
   };
 
-  /**
-   * Quando o user clica "Limpar":
-   * 1. Reseta todos os campos locais para strings vazias
-   * 2. Chama onClear() do pai para limpar os filtros no estado global
-   */
   const handleClear = () => {
     setLocalFilters({
       sport: '',
-      status: '',
-      minAmount: '',
-      maxAmount: '',
-      minRisk: '',
-      maxRisk: '',
+      betType: '',
+      selection: '',
+      minStake: '',
+      maxStake: '',
+      minOdd: '',
+      maxOdd: '',
       dateFrom: '',
       dateTo: '',
       search: '',
     });
-    onClear(); // Comunica ao App.jsx
+    onClear();
   };
 
-  /**
-   * Permite aplicar filtros com a tecla Enter (para rapidez)
-   */
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') handleApply();
   };
 
   return (
     <div className="filters">
-      {/* ─── CABEÇALHO: Título + Botões ─── */}
       <div className="filters__header">
         <h3 className="filters__title">Filtros</h3>
         <div className="filters__actions">
@@ -131,37 +80,23 @@ export default function Filters({ filters, onFilterChange, onClear }) {
         </div>
       </div>
 
-      {/* ─── GRELHA DE CAMPOS ─── */}
-      {/* CSS Grid: os campos distribuem-se automaticamente em colunas */}
       <div className="filters__grid">
-
-        {/* Campo de pesquisa geral (ocupa toda a largura: --full) */}
+        {/* Pesquisa geral */}
         <div className="filters__field filters__field--full">
           <label className="filters__label">Pesquisa</label>
-          {/*
-           * Input controlado pelo React:
-           * - value: o que aparece no input (vem do estado)
-           * - onChange: quando o user escreve, atualiza o estado
-           * - e.target.value: o novo valor do input (o que o user escreveu)
-           */}
           <input
             className="filters__input"
             type="text"
-            placeholder="Pesquisar por utilizador, evento, desporto..."
+            placeholder="Pesquisar por evento, seleção, desporto..."
             value={localFilters.search}
             onChange={(e) => handleChange('search', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
 
-        {/* Dropdown para selecionar o desporto */}
+        {/* Desporto */}
         <div className="filters__field">
           <label className="filters__label">Desporto</label>
-          {/*
-           * <select> é um dropdown HTML.
-           * Funciona como input controlado (value + onChange).
-           * .map() cria uma <option> para cada desporto no array SPORTS.
-           */}
           <select
             className="filters__select"
             value={localFilters.sport}
@@ -170,88 +105,103 @@ export default function Filters({ filters, onFilterChange, onClear }) {
             <option value="">Todos</option>
             {SPORTS.map((s) => (
               <option key={s} value={s}>
-                {translateSport(s)} {/* Mostra "Futebol" em vez de "football" */}
+                {translateSport(s)}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Dropdown para selecionar o estado */}
+        {/* Tipo de aposta */}
         <div className="filters__field">
-          <label className="filters__label">Estado</label>
+          <label className="filters__label">Tipo de Aposta</label>
           <select
             className="filters__select"
-            value={localFilters.status}
-            onChange={(e) => handleChange('status', e.target.value)}
+            value={localFilters.betType}
+            onChange={(e) => handleChange('betType', e.target.value)}
           >
             <option value="">Todos</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABELS[s]} {/* Mostra "Pendente" em vez de "pending" */}
+            {BET_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {translateBetType(t)}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Campos numéricos para intervalo de valor (€) */}
+        {/* Seleção (texto) */}
         <div className="filters__field">
-          <label className="filters__label">Valor mínimo (€)</label>
+          <label className="filters__label">Seleção</label>
+          <input
+            className="filters__input"
+            type="text"
+            placeholder="Ex: Manchester United to Win"
+            value={localFilters.selection}
+            onChange={(e) => handleChange('selection', e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </div>
+
+        {/* Stake mín/máx */}
+        <div className="filters__field">
+          <label className="filters__label">Stake mínima (€)</label>
           <input
             className="filters__input"
             type="number"
             min="0"
             step="10"
             placeholder="0"
-            value={localFilters.minAmount}
-            onChange={(e) => handleChange('minAmount', e.target.value)}
+            value={localFilters.minStake}
+            onChange={(e) => handleChange('minStake', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
 
         <div className="filters__field">
-          <label className="filters__label">Valor máximo (€)</label>
+          <label className="filters__label">Stake máxima (€)</label>
           <input
             className="filters__input"
             type="number"
             min="0"
             step="10"
             placeholder="10000"
-            value={localFilters.maxAmount}
-            onChange={(e) => handleChange('maxAmount', e.target.value)}
+            value={localFilters.maxStake}
+            onChange={(e) => handleChange('maxStake', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
 
-        {/* Campos numéricos para intervalo de risco (0-100) */}
+        {/* Odds mín/máx */}
         <div className="filters__field">
-          <label className="filters__label">Risco mínimo</label>
+          <label className="filters__label">Odd mínima</label>
           <input
             className="filters__input"
             type="number"
-            min="0"
-            max="100"
-            placeholder="0"
-            value={localFilters.minRisk}
-            onChange={(e) => handleChange('minRisk', e.target.value)}
+            min="1"
+            max="4"
+            step="0.1"
+            placeholder="1.0"
+            value={localFilters.minOdd}
+            onChange={(e) => handleChange('minOdd', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
 
         <div className="filters__field">
-          <label className="filters__label">Risco máximo</label>
+          <label className="filters__label">Odd máxima</label>
           <input
             className="filters__input"
             type="number"
-            min="0"
-            max="100"
-            placeholder="100"
-            value={localFilters.maxRisk}
-            onChange={(e) => handleChange('maxRisk', e.target.value)}
+            min="1"
+            max="4"
+            step="0.1"
+            placeholder="4.0"
+            value={localFilters.maxOdd}
+            onChange={(e) => handleChange('maxOdd', e.target.value)}
             onKeyDown={handleKeyDown}
           />
         </div>
 
-        {/* Campos de data (input type="date" abre um calendário nativo) */}
+        {/* Datas */}
         <div className="filters__field">
           <label className="filters__label">Data início</label>
           <input

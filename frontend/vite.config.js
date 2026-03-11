@@ -45,6 +45,10 @@ export default defineConfig({
         target: 'http://localhost:3001', // Destino: o nosso backend
         changeOrigin: true,               // Altera o header Origin para o do target
       },
+      '/ws': {
+        target: 'ws://localhost:3001',    // WebSocket proxy
+        ws: true,                          // Ativar proxy de WebSocket
+      },
     },
   },
 

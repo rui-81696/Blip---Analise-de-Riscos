@@ -1,143 +1,176 @@
 /*
  * ===== index.js (Backend) =====
- * Este é o PONTO DE ENTRADA do servidor backend.
- * Usa o framework Express.js para criar uma API REST (servidor HTTP).
+ * PONTO DE ENTRADA do servidor backend.
+ * Usa Express.js para a API REST e WebSocket (ws) para streaming em tempo real.
  *
- * O QUE É UMA API REST?
- * É um servidor que responde a pedidos HTTP (GET, POST, PUT, DELETE)
- * com dados em formato JSON. O frontend faz pedidos a esta API para
- * obter/enviar dados.
- *
- * O QUE É O EXPRESS?
- * Express é o framework mais popular de Node.js para criar servidores web.
- * Simplifica a criação de rotas (endpoints), middleware, etc.
+ * ARQUITETURA:
+ * 1. API REST (Express): endpoints para consultar dados históricos, métricas
+ * 2. WebSocket: streaming de novas apostas em tempo real para o frontend
  *
  * FLUXO DE ARRANQUE:
- * 1. Importa dependências
- * 2. Configura middleware (CORS, JSON parser)
- * 3. Inicializa a base de dados (LowDB - ficheiro JSON)
- * 4. Se a BD estiver vazia, gera dados falsos (mock)
- * 5. Regista as rotas (URLs que a API responde)
- * 6. Inicia o servidor numa porta (3001)
- * 7. Começa a gerar apostas novas a cada 30 segundos
+ * 1. Configura Express + middleware
+ * 2. Inicializa a base de dados (LowDB)
+ * 3. Se BD vazia ou modelo antigo, gera dados mock (seed)
+ * 4. Regista rotas REST
+ * 5. Cria servidor HTTP + WebSocket na mesma porta
+ * 6. Inicia geração periódica de apostas (broadcast via WebSocket)
  */
 
-// Express: framework para criar o servidor HTTP/API
 import express from 'express';
-
-// CORS (Cross-Origin Resource Sharing): permite que o frontend (porta 5173)
-// faça pedidos ao backend (porta 3001). Sem isto, o browser bloqueia os pedidos.
 import cors from 'cors';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
 
-// Função para inicializar a base de dados LowDB (ficheiro JSON)
 import { initDb } from './data/db.js';
-
-// Função para gerar dados falsos iniciais
 import { seedDatabase } from './data/seed.js';
+import { generateMarkets, generateSingleBet } from './data/mockGenerator.js';
 
-// Routers: agrupam endpoints relacionados
-import betsRouter from './routes/bets.js';     // Endpoints de /api/bets
-import metricsRouter from './routes/metrics.js'; // Endpoints de /api/metrics
+import betsRouter from './routes/bets.js';
+import metricsRouter from './routes/metrics.js';
 
-// Criar a aplicação Express (o servidor)
 const app = express();
-
-// Porta onde o servidor vai correr.
-// process.env.PORT permite usar uma variável de ambiente (útil em produção).
-// || 3001 é o valor por defeito (fallback) para desenvolvimento.
 const PORT = process.env.PORT || 3001;
 
 /*
  * ─── MIDDLEWARE ───
- * Middleware são funções que processam TODOS os pedidos antes de chegarem às rotas.
- * São como "filtros" que o pedido atravessa.
- *
- * app.use() regista middleware na aplicação.
  */
-app.use(cors());          // Permitir pedidos de outros domínios (frontend)
-app.use(express.json());  // Converter o corpo dos pedidos de JSON para objetos JS
+app.use(cors());
+app.use(express.json());
 
 /*
- * ─── INICIALIZAR BASE DE DADOS ───
- * LowDB é uma base de dados simples que guarda tudo num ficheiro JSON.
- * Ideal para protótipos e projetos pequenos.
- * await = esperar que a operação assíncrona (abrir/ler ficheiro) termine.
+ * ─── BASE DE DADOS ───
  */
 const db = await initDb();
 
 /*
- * ─── SEED (Gerar dados iniciais) ───
- * Se a base de dados estiver vazia (primeira execução),
- * gera 500 apostas falsas simuladas para termos dados para visualizar.
+ * ─── SEED + MERCADOS ───
+ * Se a BD estiver vazia OU tiver o modelo antigo (versão < 2), re-gera tudo.
+ * Os mercados são guardados para reutilizar na geração via WebSocket.
  */
-const bets = db.data.bets;
-if (!bets || bets.length === 0) {
-  console.log('📦 Base de dados vazia. A gerar dados mock...');
-  await seedDatabase(db);
+let markets = db.data.markets || null;
+
+if (!db.data.version || db.data.version < 2 || !db.data.bets || db.data.bets.length === 0) {
+  console.log('📦 Base de dados vazia ou modelo antigo. A gerar dados mock...');
+  const result = await seedDatabase(db);
+  markets = result.markets;
   console.log(`✅ ${db.data.bets.length} apostas geradas com sucesso.`);
+} else if (!markets || Object.keys(markets).length === 0) {
+  // BD tem dados mas não tem mercados → regenerar mercados
+  markets = generateMarkets();
+  db.data.markets = markets;
+  await db.write();
+  console.log('🔄 Mercados regenerados.');
 }
 
 /*
- * ─── REGISTAR ROTAS ───
- * app.use(caminho, router) associa um router a um caminho base.
- * Todos os endpoints dentro do router ficam "debaixo" desse caminho.
- * Ex: betsRouter tem GET '/' que se torna GET '/api/bets'
+ * ─── ROTAS REST ───
  */
-app.use('/api/bets', betsRouter(db));       // Endpoints de apostas
-app.use('/api/metrics', metricsRouter(db));  // Endpoints de métricas
+app.use('/api/bets', betsRouter(db));
+app.use('/api/metrics', metricsRouter(db));
 
-// Health check: endpoint simples para verificar se o servidor está vivo
-// Útil para monitorização e para o Playwright (testes E2E)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    totalBets: db.data.bets.length,
+    wsClients: wss.clients.size,
+  });
 });
 
 /*
- * ─── GERAÇÃO PERIÓDICA DE APOSTAS (simula dados em tempo real) ───
- * A cada 30 segundos, gera uma nova aposta falsa e adiciona à base de dados.
- * Isto simula um sistema real onde apostas estão constantemente a ser criadas.
+ * ─── SERVIDOR HTTP + WEBSOCKET ───
+ * O servidor HTTP (Express) e o WebSocket partilham a mesma porta.
+ * O WebSocket fica acessível em ws://localhost:3001/ws
+ *
+ * WebSocket permite comunicação bidirecional em tempo real.
+ * Quando uma nova aposta é gerada, é imediatamente enviada a todos
+ * os clientes ligados (broadcast), sem que o frontend precise de fazer polling.
  */
-const GENERATION_INTERVAL = 30000; // 30 segundos em milissegundos
-let generationTimer = null;
+const server = createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  console.log(`🔗 WebSocket client conectado (total: ${wss.clients.size})`);
+  ws.on('close', () => {
+    console.log(`🔌 WebSocket client desconectado (total: ${wss.clients.size})`);
+  });
+});
+
+/**
+ * Envia dados a TODOS os clientes WebSocket ligados (broadcast).
+ * @param {object} data - Dados a enviar (serão convertidos para JSON)
+ */
+function broadcast(data) {
+  const message = JSON.stringify(data);
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // 1 = WebSocket.OPEN
+      client.send(message);
+    }
+  });
+}
+
+/*
+ * ─── GERAÇÃO PERIÓDICA DE APOSTAS (tempo real via WebSocket) ───
+ *
+ * A cada 2 segundos, gera um lote de apostas novas e transmite via WebSocket.
+ * Simula o fluxo contínuo de apostas que uma empresa de apostas recebe.
+ *
+ * Nota: Em produção seriam ~500/seg (normal) ou ~2000/seg (pico).
+ * Para demo, geramos ~5 apostas/lote a cada 2 segundos.
+ *
+ * As apostas são também guardadas na BD (com save periódico a cada 30s
+ * para não sobrecarregar o disco com escritas constantes).
+ */
+const GENERATION_INTERVAL = 2000;   // Intervalo entre lotes (ms)
+const BETS_PER_BATCH = 5;           // Apostas por lote
+const DB_SAVE_INTERVAL = 30000;     // Intervalo de save ao disco (ms)
+const MAX_BETS = 200000;            // Limite de apostas na BD
+let pendingSave = false;
 
 async function startPeriodicGeneration() {
-  // Import dinâmico: carrega o módulo só quando é necessário
-  const { generateSingleBet } = await import('./data/mockGenerator.js');
-  
-  // setInterval: executa a função repetidamente a cada X milissegundos
-  generationTimer = setInterval(async () => {
-    // Gerar uma nova aposta falsa
-    const newBet = generateSingleBet();
-
-    // Adicionar ao array de apostas na base de dados
-    db.data.bets.push(newBet);
-    
-    // Limite de segurança: manter no máximo 10000 registos
-    // .slice(-10000) mantém apenas os últimos 10000 elementos
-    if (db.data.bets.length > 10000) {
-      db.data.bets = db.data.bets.slice(-10000);
+  // Gerar e transmitir novas apostas periodicamente
+  setInterval(() => {
+    const newBets = [];
+    for (let i = 0; i < BETS_PER_BATCH; i++) {
+      const bet = generateSingleBet(markets);
+      bet.createdAt = new Date().toISOString(); // Data atual (tempo real)
+      newBets.push(bet);
+      db.data.bets.push(bet);
     }
-    
-    // Guardar alterações no ficheiro JSON
-    await db.write();
-    console.log(`🎰 Nova aposta gerada: ${newBet.id.slice(0, 8)}... (${newBet.sport} - €${newBet.amount})`);
+
+    // Limitar o tamanho da BD (manter apenas os mais recentes)
+    if (db.data.bets.length > MAX_BETS) {
+      db.data.bets = db.data.bets.slice(-MAX_BETS);
+    }
+
+    pendingSave = true;
+
+    // Broadcast a todos os clientes WebSocket
+    broadcast({ type: 'new_bets', data: newBets });
   }, GENERATION_INTERVAL);
+
+  // Save periódico ao disco (evita writes constantes)
+  setInterval(async () => {
+    if (pendingSave) {
+      db.data.metadata.lastUpdated = new Date().toISOString();
+      await db.write();
+      pendingSave = false;
+    }
+  }, DB_SAVE_INTERVAL);
 }
 
 /*
  * ─── INICIAR O SERVIDOR ───
- * app.listen(porta, callback) inicia o servidor na porta especificada.
- * A callback é executada quando o servidor está pronto.
+ * server.listen (não app.listen) porque o HTTP e WS partilham o servidor.
  */
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   console.log(`\n🚀 Blip Risk Analysis - Backend`);
-  console.log(`📡 Servidor a correr em http://localhost:${PORT}`);
-  console.log(`📊 API disponível em http://localhost:${PORT}/api`);
-  console.log(`💾 Total de apostas: ${db.data.bets.length}\n`);
-  
-  // Começar a gerar apostas automaticamente
+  console.log(`📡 HTTP em http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket em ws://localhost:${PORT}/ws`);
+  console.log(`💾 Total de apostas: ${db.data.bets.length}`);
+  console.log(`📊 Mercados: ${Object.keys(markets).length} eventos\n`);
+
   await startPeriodicGeneration();
 });
 
-// Exportar a app para que possa ser usada em testes
 export default app;

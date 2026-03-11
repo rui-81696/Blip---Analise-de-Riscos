@@ -1,40 +1,23 @@
 /*
  * ===== App.jsx =====
- * Este é o COMPONENTE PRINCIPAL da aplicação.
- * Um "componente" em React é como um bloco de construção reutilizável
- * que contém HTML (JSX) + lógica (JavaScript) + estilos (CSS/SCSS).
+ * COMPONENTE PRINCIPAL da aplicação.
  *
- * Este componente:
- * 1. Junta todos os outros componentes (tabela, filtros, métricas, chat)
- * 2. Gere o estado global (dados das apostas, filtros, paginação)
- * 3. Implementa o "polling" (atualização automática a cada 30 segundos)
- *
- * CONCEITOS REACT IMPORTANTES:
- * - useEffect: executa código quando o componente é montado ou quando algo muda
- * - Props: dados passados de um componente "pai" para um componente "filho"
- * - Hooks: funções especiais do React (começam com "use") que gerem estado e efeitos
+ * Junta todos os componentes (tabela, filtros, métricas, chat),
+ * gere o estado global (dados, filtros, paginação),
+ * e mantém ligação WebSocket para receber apostas em tempo real.
  */
 
-// "useEffect" é um Hook do React que permite executar código em momentos específicos
-// (ex: quando a página carrega, ou a cada X segundos)
 import { useEffect } from 'react';
+import { useBets, useMetrics, useLiveBets } from './hooks/useBets';
 
-// Importar os nossos hooks personalizados que gerem os dados das apostas e métricas
-// (hooks são funções que encapsulam lógica reutilizável)
-import { useBets, useMetrics } from './hooks/useBets';
+import BetsTable from './components/BetsTable/BetsTable';
+import Pagination from './components/Pagination/Pagination';
+import Filters from './components/Filters/Filters';
+import MetricsPanel from './components/MetricsPanel/MetricsPanel';
+import Chat from './components/Chat/Chat';
 
-// Importar todos os componentes visuais que compõem a aplicação
-import BetsTable from './components/BetsTable/BetsTable';      // Tabela de apostas
-import Pagination from './components/Pagination/Pagination';    // Navegação entre páginas
-import Filters from './components/Filters/Filters';            // Painel de filtros
-import MetricsPanel from './components/MetricsPanel/MetricsPanel'; // Painel de métricas
-import Chat from './components/Chat/Chat';                      // Chat com assistente IA
-
-// Importar os estilos específicos deste componente
 import './App.scss';
 
-// Intervalo de polling para atualização automática (RF-12)
-// 30000 milissegundos = 30 segundos (a cada 30s os dados são atualizados)
 const POLLING_INTERVAL = 30000;
 
 /**
@@ -42,24 +25,6 @@ const POLLING_INTERVAL = 30000;
  * Esta é uma "function component" - a forma moderna de criar componentes em React
  */
 function App() {
-  /*
-   * ─── HOOK useBets() ───
-   * Este hook devolve um objeto com tudo o que precisamos para gerir as apostas.
-   * Usa "destructuring" para extrair cada propriedade do objeto:
-   *   bets         → Array com as apostas da página atual
-   *   pagination   → Objeto com info de paginação (página atual, total, etc.)
-   *   filters      → Objeto com os filtros ativos
-   *   sortBy       → Nome da coluna pela qual estamos a ordenar
-   *   sortOrder    → Direção da ordenação ('asc' = crescente, 'desc' = decrescente)
-   *   loading      → true/false - se os dados estão a ser carregados
-   *   error        → Mensagem de erro (null se não houver erro)
-   *   setPage      → Função para mudar de página
-   *   setLimit     → Função para alterar quantos itens por página
-   *   updateFilters → Função para aplicar novos filtros
-   *   clearFilters  → Função para limpar todos os filtros
-   *   handleSort    → Função para ordenar por uma coluna
-   *   refetch       → Função para forçar uma nova busca de dados
-   */
   const {
     bets,
     pagination,
@@ -76,36 +41,18 @@ function App() {
     refetch,
   } = useBets();
 
-  /*
-   * ─── HOOK useMetrics() ───
-   * Similar ao useBets, mas para as métricas agregadas (totais, médias, etc.)
-   * "loading: metricsLoading" renomeia "loading" para "metricsLoading" 
-   * para não conflitar com o loading das apostas.
-   * "refetch: refetchMetrics" renomeia "refetch" pelo mesmo motivo.
-   */
   const { metrics, loading: metricsLoading, refetch: refetchMetrics } = useMetrics();
 
-  /*
-   * ─── POLLING AUTOMÁTICO (useEffect) ───
-   * useEffect executa o código dentro dele quando o componente é montado.
-   * 
-   * setInterval: cria um temporizador que executa uma função repetidamente.
-   * A cada 30 segundos, chama refetch() e refetchMetrics() para buscar dados novos.
-   * 
-   * "return () => clearInterval(interval)" é a função de "limpeza":
-   * quando o componente é desmontado (removido da página), o temporizador é parado.
-   * Isto evita memory leaks (fugas de memória).
-   *
-   * [refetch, refetchMetrics] é o array de dependências:
-   * o useEffect volta a executar SE estas funções mudarem.
-   */
+  // WebSocket: receber apostas em tempo real
+  const { connected, totalReceived } = useLiveBets();
+
+  // Polling: atualizar dados periodicamente (complementa WebSocket)
   useEffect(() => {
     const interval = setInterval(() => {
-      refetch();          // Buscar apostas atualizadas
-      refetchMetrics();   // Buscar métricas atualizadas
+      refetch();
+      refetchMetrics();
     }, POLLING_INTERVAL);
 
-    // Função de limpeza - para o temporizador quando o componente é removido
     return () => clearInterval(interval);
   }, [refetch, refetchMetrics]);
 
@@ -125,24 +72,23 @@ function App() {
    */
 
   return (
-    // A div principal que envolve toda a aplicação
     <div className="app">
 
-      {/* ─── HEADER (Cabeçalho) ─── */}
+      {/* Header */}
       <header className="app__header">
         <div className="app__header-content">
-          {/* Logotipo */}
           <div className="app__logo">
-            <span className="app__logo-icon">B</span> {/* A letra "B" como ícone */}
+            <span className="app__logo-icon">B</span>
             <div className="app__logo-text">
               <h1 className="app__title">Blip</h1>
               <span className="app__subtitle">Risk Analysis</span>
             </div>
           </div>
-          {/* Botão de atualização manual */}
           <div className="app__header-actions">
-            {/* onClick: quando o botão é clicado, executa ambas as funções de refetch */}
-            {/* A arrow function () => {} é necessária para chamar as funções ao clicar */}
+            <span className={`app__live-indicator ${connected ? 'app__live-indicator--online' : 'app__live-indicator--offline'}`}>
+              {connected ? '🟢 Online' : '🔴 Offline'}
+              {connected && totalReceived > 0 && ` · ${totalReceived} novas`}
+            </span>
             <button className="app__refresh-btn" onClick={() => { refetch(); refetchMetrics(); }} title="Atualizar dados">
               🔄 Atualizar
             </button>
@@ -150,11 +96,9 @@ function App() {
         </div>
       </header>
 
-      {/* ─── CONTEÚDO PRINCIPAL ─── */}
+      {/* Conteúdo principal */}
       <main className="app__main">
 
-        {/* Mensagem de erro (só aparece se "error" não for null/undefined) */}
-        {/* O operador && funciona assim: se error for truthy, mostra o que vem a seguir */}
         {error && (
           <div className="app__error">
             <p>⚠️ Erro: {error}</p>
@@ -162,52 +106,34 @@ function App() {
           </div>
         )}
 
-        {/* 
-         * ─── PAINEL DE MÉTRICAS (RF-05) ───
-         * Exibe totais, lucros, perdas e distribuição de risco.
-         * Passa as "props" metrics e loading ao componente MetricsPanel.
-         * Props são como argumentos que enviamos a um componente filho.
-         */}
+        {/* Métricas de risco */}
         <section className="app__section">
           <MetricsPanel metrics={metrics} loading={metricsLoading} />
         </section>
 
-        {/* 
-         * ─── FILTROS (RF-04) ───
-         * O utilizador pode filtrar por desporto, valor, risco, data, etc.
-         * onFilterChange e onClear são "callbacks" - funções que o componente filho
-         * vai chamar quando o utilizador interagir com os filtros.
-         */}
+        {/* Filtros */}
         <section className="app__section">
           <Filters filters={filters} onFilterChange={updateFilters} onClear={clearFilters} />
         </section>
 
-        {/* 
-         * ─── TABELA DE APOSTAS (RF-01) + PAGINAÇÃO (RF-03) ───
-         * BetsTable: mostra os dados das apostas em formato de tabela
-         * Pagination: botões para navegar entre páginas de resultados
-         */}
+        {/* Tabela de apostas + paginação */}
         <section className="app__section">
           <BetsTable
-            bets={bets}              // Os dados das apostas a mostrar
-            sortBy={sortBy}          // Coluna atualmente ordenada
-            sortOrder={sortOrder}    // Direção da ordenação
-            onSort={handleSort}      // Callback quando o user clica numa coluna
-            loading={loading}        // Se está a carregar dados
+            bets={bets}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onSort={handleSort}
+            loading={loading}
           />
           <Pagination
-            pagination={pagination}      // Info de paginação (página, total, etc.)
-            onPageChange={setPage}       // Callback quando muda de página
-            onLimitChange={setLimit}     // Callback quando muda itens por página
+            pagination={pagination}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
           />
         </section>
       </main>
 
-      {/* 
-       * ─── CHAT COM ASSISTENTE IA (RF-06) ───
-       * Componente flutuante de chat. Passa a função updateFilters
-       * para que o assistente possa aplicar filtros via linguagem natural (futuro).
-       */}
+      {/* Chat IA */}
       <Chat onApplyFilters={updateFilters} />
 
       {/* ─── FOOTER (Rodapé) ─── */}

@@ -1,70 +1,95 @@
 /*
  * ===== bets.js (Router de Apostas) =====
- * Define todos os ENDPOINTS (URLs) relacionados com apostas.
+ * Define todos os ENDPOINTS relacionados com apostas.
  *
- * O QUE É UM ROUTER?
- * Um Router agrupa endpoints relacionados. Em vez de definir tudo no index.js,
- * separamos por funcionalidade. Este router é "montado" em '/api/bets' no index.js,
- * por isso GET '/' aqui corresponde a GET '/api/bets' na API.
+ * MODELO DE APOSTA (Bet):
+ * { id, sport, event, betType, selection, odd, stake, createdAt }
  *
- * O QUE É UM ENDPOINT?
- * É uma URL que a API disponibiliza. Cada endpoint responde a um método HTTP:
- * - GET: pedir dados (leitura)
- * - POST: criar dados
- * - PUT/PATCH: atualizar dados
- * - DELETE: apagar dados
- *
- * CONCEITOS EXPRESS:
- * - router.get(caminho, handler): define um endpoint GET
- * - req (request): objeto com toda a info do pedido (query params, body, etc.)
- * - res (response): objeto para enviar a resposta ao cliente
- * - req.query: parâmetros da URL (ex: ?page=1&limit=20)
- * - req.params: parâmetros da rota (ex: /bets/:id → req.params.id)
- * - res.json(): envia uma resposta em formato JSON
+ * ENDPOINTS:
+ * GET /api/bets              → Listagem paginada e filtrada
+ * GET /api/bets/sports/list  → Lista de desportos únicos
+ * GET /api/bets/events/list  → Lista de eventos (com filtro por desporto)
+ * GET /api/bets/bet-types/list → Lista de tipos de aposta
+ * GET /api/bets/selections/list → Lista de seleções (com filtros)
+ * GET /api/bets/:id          → Detalhe de uma aposta
  */
 
-// Router do Express (módulo para agrupar endpoints)
 import { Router } from 'express';
 
-/**
- * Função que cria e configura o router de apostas.
- * Recebe a instância da base de dados (db) como parâmetro.
- *
- * @param {object} db - Instância da base de dados LowDB
- * @returns {Router} Router configurado com todos os endpoints
- */
 export default function betsRouter(db) {
-  // Criar nova instância de Router
   const router = Router();
 
+  /*
+   * ─── ROTAS ESPECÍFICAS (antes de /:id para evitar conflito) ───
+   */
+
   /**
-   * ═══════════════════════════════════════════════════
+   * GET /api/bets/sports/list
+   * Lista todos os desportos únicos na base de dados.
+   */
+  router.get('/sports/list', (req, res) => {
+    const sports = [...new Set(db.data.bets.map((b) => b.sport))].sort();
+    res.json({ data: sports });
+  });
+
+  /**
+   * GET /api/bets/events/list
+   * Lista eventos únicos (com filtro opcional por desporto).
+   * Ex: /api/bets/events/list?sport=Football
+   */
+  router.get('/events/list', (req, res) => {
+    let bets = db.data.bets;
+    if (req.query.sport) {
+      bets = bets.filter((b) => b.sport.toLowerCase() === req.query.sport.toLowerCase());
+    }
+    const events = [...new Set(bets.map((b) => b.event))].sort();
+    res.json({ data: events });
+  });
+
+  /**
+   * GET /api/bets/bet-types/list
+   * Lista todos os tipos de aposta únicos.
+   */
+  router.get('/bet-types/list', (req, res) => {
+    const betTypes = [...new Set(db.data.bets.map((b) => b.betType))].sort();
+    res.json({ data: betTypes });
+  });
+
+  /**
+   * GET /api/bets/selections/list
+   * Lista seleções únicas (com filtro por evento e/ou tipo).
+   * Ex: /api/bets/selections/list?event=Manchester+United+vs+Liverpool&betType=Win
+   */
+  router.get('/selections/list', (req, res) => {
+    let bets = db.data.bets;
+    if (req.query.event) {
+      bets = bets.filter((b) => b.event.toLowerCase() === req.query.event.toLowerCase());
+    }
+    if (req.query.betType) {
+      bets = bets.filter((b) => b.betType.toLowerCase() === req.query.betType.toLowerCase());
+    }
+    const selections = [...new Set(bets.map((b) => b.selection))].sort();
+    res.json({ data: selections });
+  });
+
+  /*
+   * ─── ROTA PRINCIPAL: LISTAGEM ───
+   */
+
+  /**
    * GET /api/bets
-   * Endpoint principal: listagem paginada e filtrada de apostas
+   * Listagem paginada e filtrada de apostas.
    *
-   * Query params (parâmetros na URL após o ?):
-   *   - page: número da página (começa em 1)
-   *   - limit: quantos itens por página (máx 100)
-   *   - sortBy: campo para ordenar (ex: 'createdAt', 'amount')
-   *   - sortOrder: 'asc' (crescente) ou 'desc' (decrescente)
-   *   - sport: filtrar por desporto (ex: 'football')
-   *   - status: filtrar por estado (ex: 'pending')
-   *   - minAmount/maxAmount: intervalo de valor
-   *   - minRisk/maxRisk: intervalo de risco
-   *   - dateFrom/dateTo: intervalo de datas
-   *   - search: pesquisa geral em texto
+   * Query params:
+   *   page, limit, sortBy, sortOrder
+   *   sport, event, betType, selection
+   *   minStake, maxStake, minOdd, maxOdd
+   *   dateFrom, dateTo, search
    *
-   * Exemplo de URL:
-   *   /api/bets?page=1&limit=20&sport=football&sortBy=amount&sortOrder=desc
-   * ═══════════════════════════════════════════════════
+   * Ex: /api/bets?page=1&limit=20&sport=Football&sortBy=stake&sortOrder=desc
    */
   router.get('/', (req, res) => {
     try {
-      /*
-       * ─── EXTRAIR PARÂMETROS DA QUERY STRING ───
-       * Destructuring com valores por defeito:
-       * { page = 1 } significa: se 'page' não existir na query, usa 1
-       */
       const {
         page = 1,
         limit = 20,
@@ -72,66 +97,62 @@ export default function betsRouter(db) {
         sortOrder = 'desc',
         sport,
         event,
-        status,
-        minAmount,
-        maxAmount,
-        minRisk,
-        maxRisk,
+        betType,
+        selection,
+        minStake,
+        maxStake,
+        minOdd,
+        maxOdd,
         dateFrom,
         dateTo,
         search,
       } = req.query;
 
-      // Criar uma CÓPIA do array de apostas para não alterar o original
-      // [...array] cria um novo array com os mesmos elementos (spread operator)
       let bets = [...db.data.bets];
 
-      /*
-       * ─── APLICAR FILTROS ───
-       * Cada filtro reduz o array de apostas usando .filter()
-       * .filter() cria um novo array com apenas os elementos que passam a condição
-       * Ex: bets.filter(b => b.sport === 'football') → só apostas de futebol
-       */
+      /* ─── FILTROS ─── */
 
-      // Filtro por desporto (suporta múltiplos: "football,basketball")
+      // Filtro por desporto (suporta múltiplos: "Football,Basketball")
       if (sport) {
         const sports = sport.split(',').map((s) => s.trim().toLowerCase());
         bets = bets.filter((b) => sports.includes(b.sport.toLowerCase()));
       }
 
-      // Filtro por evento (pesquisa parcial com .includes())
-      // .includes() verifica se uma string contém outra string
+      // Filtro por evento (pesquisa parcial)
       if (event) {
         const eventLower = event.toLowerCase();
         bets = bets.filter((b) => b.event.toLowerCase().includes(eventLower));
       }
 
-      // Filtro por status (suporta múltiplos: "pending,won")
-      if (status) {
-        const statuses = status.split(',').map((s) => s.trim().toLowerCase());
-        bets = bets.filter((b) => statuses.includes(b.status.toLowerCase()));
+      // Filtro por tipo de aposta (suporta múltiplos: "Win,Over/Under")
+      if (betType) {
+        const types = betType.split(',').map((t) => t.trim().toLowerCase());
+        bets = bets.filter((b) => types.includes(b.betType.toLowerCase()));
       }
 
-      // Filtro por intervalo de valor (mínimo e máximo)
-      // parseFloat() converte string para número decimal
-      if (minAmount) {
-        bets = bets.filter((b) => b.amount >= parseFloat(minAmount));
-      }
-      if (maxAmount) {
-        bets = bets.filter((b) => b.amount <= parseFloat(maxAmount));
+      // Filtro por seleção (pesquisa parcial)
+      if (selection) {
+        const selLower = selection.toLowerCase();
+        bets = bets.filter((b) => b.selection.toLowerCase().includes(selLower));
       }
 
-      // Filtro por intervalo de risco score
-      // parseInt() converte string para número inteiro
-      if (minRisk) {
-        bets = bets.filter((b) => b.riskScore >= parseInt(minRisk));
+      // Filtro por intervalo de stake (€)
+      if (minStake) {
+        bets = bets.filter((b) => b.stake >= parseFloat(minStake));
       }
-      if (maxRisk) {
-        bets = bets.filter((b) => b.riskScore <= parseInt(maxRisk));
+      if (maxStake) {
+        bets = bets.filter((b) => b.stake <= parseFloat(maxStake));
+      }
+
+      // Filtro por intervalo de odds
+      if (minOdd) {
+        bets = bets.filter((b) => b.odd >= parseFloat(minOdd));
+      }
+      if (maxOdd) {
+        bets = bets.filter((b) => b.odd <= parseFloat(maxOdd));
       }
 
       // Filtro por intervalo de datas
-      // new Date() converte string ISO num objeto Date para comparação
       if (dateFrom) {
         const from = new Date(dateFrom);
         bets = bets.filter((b) => new Date(b.createdAt) >= from);
@@ -141,155 +162,84 @@ export default function betsRouter(db) {
         bets = bets.filter((b) => new Date(b.createdAt) <= to);
       }
 
-      // Pesquisa geral: procura o texto em userId, event, sport ou id
-      // O operador || (OU) retorna true se QUALQUER condição for true
+      // Pesquisa geral: procura o texto em evento, seleção, tipo, desporto ou ID
       if (search) {
         const searchLower = search.toLowerCase();
         bets = bets.filter(
           (b) =>
-            b.userId.toLowerCase().includes(searchLower) ||
             b.event.toLowerCase().includes(searchLower) ||
+            b.selection.toLowerCase().includes(searchLower) ||
+            b.betType.toLowerCase().includes(searchLower) ||
             b.sport.toLowerCase().includes(searchLower) ||
             b.id.toLowerCase().includes(searchLower)
         );
       }
 
-      /*
-       * ─── ORDENAÇÃO ───
-       * .sort() ordena o array "in-place" (modifica o próprio array).
-       * A função de comparação recebe 2 elementos (a, b):
-       * - Retorna negativo: a vem antes de b
-       * - Retorna positivo: b vem antes de a
-       * - Retorna 0: mantém a ordem
-       *
-       * "order" é 1 (asc) ou -1 (desc) - multiplicar inverte a ordem.
-       */
-
-      // Validar que o campo de ordenação é permitido (segurança)
+      /* ─── ORDENAÇÃO ─── */
       const validSortFields = [
-        'createdAt', 'amount', 'odds', 'riskScore',
-        'sport', 'event', 'status', 'userId',
+        'createdAt', 'stake', 'odd', 'sport', 'event', 'betType', 'selection',
       ];
       const sortField = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
       const order = sortOrder === 'asc' ? 1 : -1;
 
       bets.sort((a, b) => {
-        const aVal = a[sortField]; // Acesso dinâmico: a['amount'] = a.amount
+        const aVal = a[sortField];
         const bVal = b[sortField];
-
-        // Strings usam localeCompare (comparação alfabética correta)
         if (typeof aVal === 'string') {
           return aVal.localeCompare(bVal) * order;
         }
-        // Números usam subtração simples
         return (aVal - bVal) * order;
       });
 
-      /*
-       * ─── PAGINAÇÃO ───
-       * Divide os resultados em "páginas" para não enviar tudo de uma vez.
-       * Ex: 500 apostas com limit=20 → 25 páginas de 20 apostas cada
-       *
-       * Math.max(1, ...) garante que a página é pelo menos 1
-       * Math.min(100, ...) limita o máximo de itens por página a 100
-       * .slice(start, end) extrai uma parte do array
-       */
+      /* ─── PAGINAÇÃO ─── */
       const pageNum = Math.max(1, parseInt(page));
       const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
       const totalItems = bets.length;
-      const totalPages = Math.ceil(totalItems / limitNum); // Math.ceil arredonda para cima
-
-      // Calcular o índice de início e extrair a "fatia" da página atual
+      const totalPages = Math.ceil(totalItems / limitNum);
       const startIndex = (pageNum - 1) * limitNum;
       const paginatedBets = bets.slice(startIndex, startIndex + limitNum);
 
-      // Enviar a resposta JSON ao frontend
       res.json({
-        data: paginatedBets,    // Apostas desta página
-        pagination: {           // Info de paginação
+        data: paginatedBets,
+        pagination: {
           page: pageNum,
           limit: limitNum,
           totalItems,
           totalPages,
-          hasNextPage: pageNum < totalPages,  // Há próxima página?
-          hasPrevPage: pageNum > 1,           // Há página anterior?
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
         },
-        filters: {              // Filtros que foram aplicados (echo back)
+        filters: {
           sport: sport || null,
           event: event || null,
-          status: status || null,
-          minAmount: minAmount ? parseFloat(minAmount) : null,
-          maxAmount: maxAmount ? parseFloat(maxAmount) : null,
-          minRisk: minRisk ? parseInt(minRisk) : null,
-          maxRisk: maxRisk ? parseInt(maxRisk) : null,
+          betType: betType || null,
+          selection: selection || null,
+          minStake: minStake ? parseFloat(minStake) : null,
+          maxStake: maxStake ? parseFloat(maxStake) : null,
+          minOdd: minOdd ? parseFloat(minOdd) : null,
+          maxOdd: maxOdd ? parseFloat(maxOdd) : null,
           dateFrom: dateFrom || null,
           dateTo: dateTo || null,
           search: search || null,
         },
       });
     } catch (error) {
-      // Se algum erro ocorrer, log no servidor e resposta 500 ao cliente
       console.error('Erro ao listar apostas:', error);
       res.status(500).json({ error: 'Erro interno ao processar o pedido' });
     }
   });
 
   /**
-   * ═══════════════════════════════════════════════════
    * GET /api/bets/:id
-   * Retorna o detalhe de UMA aposta específica.
-   * :id é um parâmetro dinâmico na URL (req.params.id).
-   * Ex: GET /api/bets/a1b2c3d4-... → devolve a aposta com esse ID
-   * ═══════════════════════════════════════════════════
+   * Retorna o detalhe de uma aposta específica.
    */
   router.get('/:id', (req, res) => {
-    // .find() procura o primeiro elemento que satisfaz a condição
     const bet = db.data.bets.find((b) => b.id === req.params.id);
-
-    // Se não encontrou, responde com status 404 (Not Found)
     if (!bet) {
       return res.status(404).json({ error: 'Aposta não encontrada' });
     }
-
-    // Se encontrou, responde com a aposta
     res.json({ data: bet });
   });
 
-  /**
-   * ═══════════════════════════════════════════════════
-   * GET /api/bets/sports/list
-   * Lista todos os desportos únicos existentes na base de dados.
-   *
-   * new Set() remove duplicados de um array (um Set só guarda valores únicos)
-   * [...new Set(array)] converte o Set de volta para array
-   * .sort() ordena alfabeticamente
-   * ═══════════════════════════════════════════════════
-   */
-  router.get('/sports/list', (req, res) => {
-    const sports = [...new Set(db.data.bets.map((b) => b.sport))].sort();
-    res.json({ data: sports });
-  });
-
-  /**
-   * ═══════════════════════════════════════════════════
-   * GET /api/bets/events/list
-   * Lista todos os eventos únicos (com filtro opcional por desporto).
-   * Ex: /api/bets/events/list?sport=football → só eventos de futebol
-   * ═══════════════════════════════════════════════════
-   */
-  router.get('/events/list', (req, res) => {
-    let bets = db.data.bets;
-
-    // Se foi especificado um desporto, filtrar primeiro
-    if (req.query.sport) {
-      bets = bets.filter((b) => b.sport.toLowerCase() === req.query.sport.toLowerCase());
-    }
-
-    // Extrair eventos únicos e ordenar
-    const events = [...new Set(bets.map((b) => b.event))].sort();
-    res.json({ data: events });
-  });
-
-  // Devolver o router configurado para ser usado no index.js
   return router;
 }

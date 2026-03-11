@@ -83,7 +83,26 @@
   // Área dos botões de ação do header
   &__header-actions {
     display: flex;
-    gap: $spacing-sm;
+    align-items: center;
+    gap: $spacing-md;
+  }
+
+  // Indicador de ligação WebSocket
+  &__live-indicator {
+    font-size: $font-size-xs;
+    padding: $spacing-xs $spacing-sm;
+    border-radius: $border-radius-sm;
+    font-weight: 500;
+
+    &--online {
+      background: rgba($success, 0.15);
+      color: $success;
+    }
+
+    &--offline {
+      background: rgba($danger, 0.15);
+      color: $danger;
+    }
   }
 
   // Botão de atualizar (usa o mixin de botão secundário)

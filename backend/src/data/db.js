@@ -44,7 +44,9 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 // Estrutura inicial da base de dados (usada quando o ficheiro não existe)
 const defaultData = {
+  version: 2,          // Versão do modelo de dados (2 = novo modelo Bet)
   bets: [],            // Array vazio para guardar as apostas
+  markets: {},         // Mercados pré-gerados (seleções + odds por evento)
   metadata: {
     lastUpdated: null,   // Data da última atualização
     totalGenerated: 0,   // Contador de apostas geradas

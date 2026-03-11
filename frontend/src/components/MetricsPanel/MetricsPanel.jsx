@@ -1,22 +1,19 @@
 /*
  * ===== MetricsPanel.jsx =====
- * COMPONENTE: Painel de Métricas Agregadas
+ * COMPONENTE: Painel de Análise de Risco
  *
- * Exibe cards com estatísticas gerais das apostas:
- * - Total de apostas
- * - Volume total apostado (€)
- * - Lucro e perda totais (CLICÁVEIS)
- * - Apostas encerradas
- * - Exposição ao risco
- * - Risco médio
- * - Distribuição por nível de risco (barras de progresso)
+ * Exibe métricas agregadas de risco das apostas:
+ * - Visão geral: total apostas, volume, exposição total, odd média
+ * - Top seleções por exposição (potentialLoss = Σ stake × odd)
+ * - Distribuição de risco por desporto (barras)
  *
- * CONCEITOS USADOS:
- * - Renderização condicional: mostra loading ou dados conforme o estado
- * - Arrays de objetos: os cards são definidos num array e renderizados com .map()
- * - Cálculos inline: percentagens calculadas diretamente no JSX
- * - Object.entries(): converte um objeto em array de pares [chave, valor]
- * - useState: gerencia estado do modal (aberto/fechado)
+ * DADOS RECEBIDOS (metrics):
+ * {
+ *   overview: { totalBets, totalStake, totalPotentialLoss, avgOdd, avgStake, uniqueEvents, uniqueSelections },
+ *   bySelection: [{ selection, event, sport, betType, count, totalStake, avgOdd, potentialLoss, odds }],
+ *   byEvent: [{ event, sport, count, totalStake, potentialLoss, selectionsCount }],
+ *   bySport: { Football: { count, totalStake, potentialLoss }, ... }
+ * }
  */
 
 import { useState } from 'react';
@@ -29,18 +26,12 @@ import './MetricsPanel.scss';
 // Registar componentes Chart.js
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
-/**
- * Componente MetricsPanel
- *
- * Props:
- * @param {object} metrics - Objeto com todas as métricas (vem da API)
- * @param {boolean} loading - Se as métricas estão a ser carregadas
- */
+// Registar componentes Chart.js
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
+
 export default function MetricsPanel({ metrics, loading }) {
-  // Estado para controlar qual modal está aberto (null, 'profit', ou 'loss')
   const [modalOpen, setModalOpen] = useState(null);
 
-  // Se está a carregar OU não há métricas ainda, mostra mensagem de loading
   if (loading || !metrics) {
     return (
       <div className="metrics-panel">
@@ -49,96 +40,48 @@ export default function MetricsPanel({ metrics, loading }) {
     );
   }
 
-  /*
-   * ─── DEFINIÇÃO DOS CARDS ───
-   * Cada card é um objeto com propriedades para renderização e interação.
-   * Novos campos:
-   * - clickable: se o card é clicável (true para lucro/perda)
-   * - onClick: função a executar quando clicado
-   */
-  const primaryCards = [
+  const { overview, bySelection, bySport } = metrics;
+
+  // Cards de visão geral
+  const overviewCards = [
     {
       label: 'Total de Apostas',
-      value: formatNumber(metrics.totalBets),
-      subtext: 'Todas as apostas',
+      value: formatNumber(overview.totalBets),
+      subtext: `${overview.uniqueEvents} eventos · ${overview.uniqueSelections} seleções`,
       icon: '🎲',
       color: 'info',
-      clickable: false,
     },
     {
-      label: 'Apostas Encerradas',
-      value: formatNumber(metrics.closedBets || 0),
-      subtext: `${metrics.closedWithProfit || 0} ganhas, ${metrics.closedWithLoss || 0} perdidas`,
-      icon: '✅',
-      color: 'info',
-      clickable: false,
-    },
-    {
-      label: 'Volume Total',
-      value: formatCurrency(metrics.totalAmount),
-      subtext: 'Valor apostado',
+      label: 'Volume Total Apostado',
+      value: formatCurrency(overview.totalStake),
+      subtext: `Média: ${formatCurrency(overview.avgStake)}/aposta`,
       icon: '💰',
       color: 'info',
-      clickable: false,
-    },
-  ];
-
-  const profitLossCards = [
-    {
-      label: 'Lucro Total',
-      value: formatCurrency(metrics.totalProfit),
-      subtext: `Taxa vitória: ${metrics.winRate || 0}%`,
-      icon: '📈',
-      color: 'success',
-      clickable: true,
-      onClick: () => setModalOpen('profit'),
     },
     {
-      label: 'Perda Total',
-      value: formatCurrency(metrics.totalLoss),
-      subtext: `Média por derrota: €${(metrics.avgLoss || 0).toFixed(2)}`,
-      icon: '📉',
-      color: 'danger',
-      clickable: true,
-      onClick: () => setModalOpen('loss'),
-    },
-  ];
-
-  const riskCards = [
-    {
-      label: 'Exposição ao Risco',
-      value: formatCurrency(metrics.riskExposure),
-      subtext: `${metrics.byStatus?.pending?.count || 0} apostas pendentes`,
+      label: 'Exposição Total',
+      value: formatCurrency(overview.totalPotentialLoss),
+      subtext: 'Perda máxima (Σ stake × odd)',
       icon: '⚠️',
-      color: 'warning',
-      clickable: false,
+      color: 'danger',
     },
     {
-      label: 'Risco Médio',
-      value: `${Math.round(metrics.avgRiskScore)}/100`,
-      subtext: metrics.avgRiskScore > 50 ? 'Risco Alto ⚠️' : metrics.avgRiskScore > 25 ? 'Risco Médio' : 'Risco Baixo ✓',
-      icon: '🎯',
-      color: metrics.avgRiskScore > 50 ? 'danger' : metrics.avgRiskScore > 25 ? 'warning' : 'success',
-      clickable: false,
+      label: 'Odd Média',
+      value: overview.avgOdd?.toFixed(2),
+      subtext: 'Odds entre 1.1 e 4.0',
+      icon: '📊',
+      color: 'warning',
     },
   ];
 
-  // Renderizar um card individual
   const renderCard = (card, index) => (
-    <div
-      key={index}
-      className={`metrics-panel__card metrics-panel__card--${card.color} ${card.clickable ? 'metrics-panel__card--clickable' : ''}`}
-      onClick={card.onClick}
-      role={card.clickable ? 'button' : undefined}
-      tabIndex={card.clickable ? 0 : undefined}
-    >
+    <div key={index} className={`metrics-panel__card metrics-panel__card--${card.color}`}>
       <div className="metrics-panel__card-icon">{card.icon}</div>
       <div className="metrics-panel__card-content">
         <span className="metrics-panel__card-label">{card.label}</span>
         <span className="metrics-panel__card-value">{card.value}</span>
         <span className="metrics-panel__card-subtext">{card.subtext}</span>
       </div>
-      {card.clickable && <div className="metrics-panel__card-hint">Clica para detalhes →</div>}
     </div>
   );
 
@@ -211,21 +154,56 @@ export default function MetricsPanel({ metrics, loading }) {
   return (
     <>
       <div className="metrics-panel">
-        <h3 className="metrics-panel__title">Métricas de Risco</h3>
+        <h3 className="metrics-panel__title">Análise de Risco</h3>
 
-        {/* ─── SECÇÃO 1: CARDS PRINCIPAIS ─── */}
+        {/* Visão Geral */}
         <div className="metrics-panel__section">
           <h4 className="metrics-panel__section-title">Visão Geral</h4>
           <div className="metrics-panel__grid">
-            {primaryCards.map((card, index) => renderCard(card, index))}
+            {overviewCards.map((card, index) => renderCard(card, index))}
           </div>
         </div>
 
-        {/* ─── SECÇÃO 2: LUCRO E PERDA (CLICÁVEL) ─── */}
-        <div className="metrics-panel__section">
-          <h4 className="metrics-panel__section-title">Resultados Financeiros</h4>
-          <div className="metrics-panel__grid metrics-panel__grid--2col">
-            {profitLossCards.map((card, index) => renderCard(card, index))}
+        {/* Top seleções por exposição */}
+        {bySelection && bySelection.length > 0 && (
+          <div className="metrics-panel__section">
+            <h4 className="metrics-panel__section-title">Maiores Exposições por Seleção</h4>
+            <div className="metrics-panel__risk-table-wrapper">
+              <table className="metrics-panel__risk-table">
+                <thead>
+                  <tr>
+                    <th>Seleção</th>
+                    <th>Evento</th>
+                    <th>Tipo</th>
+                    <th>Apostas</th>
+                    <th>Total Apostado</th>
+                    <th>Odd Média</th>
+                    <th>Exposição</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bySelection.slice(0, 10).map((sel, i) => (
+                    <tr key={i} className={i < 3 ? 'metrics-panel__risk-table--highlight' : ''}>
+                      <td className="metrics-panel__risk-table-selection">{sel.selection}</td>
+                      <td>{sel.event}</td>
+                      <td><span className="metrics-panel__badge">{translateBetType(sel.betType)}</span></td>
+                      <td>{formatNumber(sel.count)}</td>
+                      <td>{formatCurrency(sel.totalStake)}</td>
+                      <td>{sel.avgOdd?.toFixed(2)}</td>
+                      <td className="metrics-panel__risk-table-loss">{formatCurrency(sel.potentialLoss)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {bySelection.length > 10 && (
+              <button
+                className="metrics-panel__show-more"
+                onClick={() => setModalOpen('selections')}
+              >
+                Ver todas as {bySelection.length} seleções →
+              </button>
+            )}
           </div>
 
           {/* Gráficos de Lucro e Perda */}
@@ -245,59 +223,43 @@ export default function MetricsPanel({ metrics, loading }) {
           </div>
         </div>
 
-        {/* ─── SECÇÃO 3: RISCO ─── */}
-        <div className="metrics-panel__section">
-          <h4 className="metrics-panel__section-title">Análise de Risco</h4>
-          <div className="metrics-panel__grid metrics-panel__grid--2col">
-            {riskCards.map((card, index) => renderCard(card, index))}
-          </div>
-        </div>
-
-        {/* ─── DISTRIBUIÇÃO DE RISCO (barras de progresso) ─── */}
-        {metrics.riskDistribution && (
-          <div className="metrics-panel__distribution">
-            <h4 className="metrics-panel__subtitle">Distribuição por Nível de Risco</h4>
+        {/* Risco por desporto */}
+        {bySport && Object.keys(bySport).length > 0 && (
+          <div className="metrics-panel__section">
+            <h4 className="metrics-panel__section-title">Risco por Desporto</h4>
             <div className="metrics-panel__bars">
-              {Object.entries(metrics.riskDistribution).map(([level, count]) => {
-                const total = metrics.totalBets || 1;
-                const percentage = Math.round((count / total) * 100);
-                const labels = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
-
-                return (
-                  <div key={level} className="metrics-panel__bar-group">
-                    <div className="metrics-panel__bar-header">
-                      <span className={`metrics-panel__bar-label risk-badge risk-badge--${level}`}>
-                        {labels[level]}
-                      </span>
-                      <span className="metrics-panel__bar-value">
-                        {count} ({percentage}%)
-                      </span>
+              {Object.entries(bySport)
+                .sort(([, a], [, b]) => b.potentialLoss - a.potentialLoss)
+                .map(([sport, data]) => {
+                  const maxLoss = Math.max(...Object.values(bySport).map((d) => d.potentialLoss));
+                  const percentage = Math.round((data.potentialLoss / maxLoss) * 100);
+                  return (
+                    <div key={sport} className="metrics-panel__bar-group">
+                      <div className="metrics-panel__bar-header">
+                        <span className="metrics-panel__bar-label">{translateSport(sport)}</span>
+                        <span className="metrics-panel__bar-value">
+                          {formatCurrency(data.potentialLoss)} · {formatNumber(data.count)} apostas
+                        </span>
+                      </div>
+                      <div className="metrics-panel__bar-track">
+                        <div
+                          className="metrics-panel__bar-fill metrics-panel__bar-fill--sport"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="metrics-panel__bar-track">
-                      <div
-                        className={`metrics-panel__bar-fill metrics-panel__bar-fill--${level}`}
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
         )}
       </div>
 
-      {/* Modal de Lucro/Perda */}
+      {/* Modal: lista completa de seleções */}
       <ProfitLossModal
-        isOpen={modalOpen === 'profit'}
+        isOpen={modalOpen === 'selections'}
         onClose={() => setModalOpen(null)}
-        type="profit"
-        metrics={metrics}
-      />
-      <ProfitLossModal
-        isOpen={modalOpen === 'loss'}
-        onClose={() => setModalOpen(null)}
-        type="loss"
+        type="selections"
         metrics={metrics}
       />
     </>

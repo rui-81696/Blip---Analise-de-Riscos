@@ -27,6 +27,10 @@
   overflow-y: auto;
   animation: slideUp 0.3s ease-out;
 
+  &--large {
+    max-width: 1000px;
+  }
+
   @media (max-width: 768px) {
     width: 95%;
     max-height: 90vh;
@@ -311,5 +315,39 @@
   .pie-chart {
     width: 150px;
     height: 150px;
+  }
+}
+
+/* ─── MODAL TABLE (Risk Detail) ─── */
+.modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+    white-space: nowrap;
+  }
+
+  th {
+    font-weight: 600;
+    color: #6b7280;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    background: white;
+  }
+
+  tbody tr:hover {
+    background: #f9fafb;
+  }
+
+  &__loss {
+    color: #dc2626;
+    font-weight: 700;
   }
 }
