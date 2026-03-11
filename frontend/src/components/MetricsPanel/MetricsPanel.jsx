@@ -18,13 +18,10 @@
 
 import { useState } from 'react';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js';
-import { Doughnut, Bar } from 'react-chartjs-2';
-import { formatCurrency, formatNumber } from '../../utils/formatters';
+import { Doughnut } from 'react-chartjs-2';
+import { formatCurrency, formatNumber, translateBetType, translateSport } from '../../utils/formatters';
 import ProfitLossModal from '../ProfitLossModal/ProfitLossModal';
 import './MetricsPanel.scss';
-
-// Registar componentes Chart.js
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
 // Registar componentes Chart.js
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
@@ -205,20 +202,20 @@ export default function MetricsPanel({ metrics, loading }) {
               </button>
             )}
           </div>
+        )}
 
-          {/* Gráficos de Lucro e Perda */}
-          <div className="metrics-panel__charts">
-            <div className="metrics-panel__chart-container">
-              <h5 className="metrics-panel__chart-title">Evolução de Lucros</h5>
-              <div className="metrics-panel__chart-box metrics-panel__chart-box--success">
-                <Doughnut data={profitChartData} options={chartOptions} />
-              </div>
+        {/* Gráficos de Lucro e Perda */}
+        <div className="metrics-panel__charts">
+          <div className="metrics-panel__chart-container">
+            <h5 className="metrics-panel__chart-title">Evolução de Lucros</h5>
+            <div className="metrics-panel__chart-box metrics-panel__chart-box--success">
+              <Doughnut data={profitChartData} options={chartOptions} />
             </div>
-            <div className="metrics-panel__chart-container">
-              <h5 className="metrics-panel__chart-title">Evolução de Perdas</h5>
-              <div className="metrics-panel__chart-box metrics-panel__chart-box--danger">
-                <Doughnut data={lossChartData} options={chartOptions} />
-              </div>
+          </div>
+          <div className="metrics-panel__chart-container">
+            <h5 className="metrics-panel__chart-title">Evolução de Perdas</h5>
+            <div className="metrics-panel__chart-box metrics-panel__chart-box--danger">
+              <Doughnut data={lossChartData} options={chartOptions} />
             </div>
           </div>
         </div>
