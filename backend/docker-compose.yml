@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: blip-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: blip
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - blip_pg_data:/var/lib/postgresql/data
+
+volumes:
+  blip_pg_data:

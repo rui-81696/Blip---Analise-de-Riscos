@@ -41,6 +41,10 @@ export const BET_TEMPLATES = [
     selections: () => ["Over 2.5", "Under 2.5"],
   },
   {
+    betType: "Both Teams to Score",
+    selections: () => ["Yes", "No"],
+  },
+  {
     betType: "Handicap",
     selections: (home, away) => [`${home} -1.5`, `${away} +1.5`],
   },

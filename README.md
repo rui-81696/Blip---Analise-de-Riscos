@@ -26,55 +26,11 @@ O Blip Risk Analysis é uma aplicação Web que permite a analistas e operadores
 |------------|-----------|
 | Frontend | React + Vite + SCSS |
 | Backend | Node.js + Express |
-| Base de Dados | LowDB (JSON file-based) |
+| Base de Dados | POSTGREESQL |
 | IA/LLM | WebLLM (MLC) — client-side |
 | Testes | Playwright (E2E) |
 | Design | Figma |
 
-## 📁 Estrutura do Projeto
-
-```
-Blip/
-├── backend/                 # Servidor API REST
-│   ├── src/
-│   │   ├── data/           # Geração de dados mock + LowDB
-│   │   │   ├── db.js       # Configuração LowDB
-│   │   │   ├── mockGenerator.js  # Gerador de apostas simuladas
-│   │   │   └── seed.js     # Script de seed inicial
-│   │   ├── routes/         # Rotas da API
-│   │   │   ├── bets.js     # Endpoints de apostas
-│   │   │   └── metrics.js  # Endpoints de métricas
-│   │   └── index.js        # Entry point do servidor
-│   └── package.json
-├── frontend/                # Aplicação React
-│   ├── src/
-│   │   ├── components/     # Componentes React
-│   │   │   ├── BetsTable/  # Tabela de apostas
-│   │   │   ├── Chat/       # Interface de chat (WebLLM)
-│   │   │   ├── Filters/    # Painel de filtros
-│   │   │   ├── MetricsPanel/ # Métricas agregadas
-│   │   │   └── Pagination/ # Paginação
-│   │   ├── hooks/          # Custom hooks
-│   │   ├── services/       # Serviço de API
-│   │   ├── styles/         # SCSS globais e variáveis
-│   │   ├── utils/          # Utilitários e formatadores
-│   │   ├── App.jsx         # Componente principal
-│   │   └── main.jsx        # Entry point
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-├── tests/                   # Testes E2E
-│   ├── e2e/
-│   │   └── bets-table.spec.js
-│   ├── playwright.config.js
-│   └── package.json
-├── docs/                    # Documentação
-│   ├── api.md              # Documentação da API
-│   └── README.md
-├── .gitignore
-├── package.json             # Root package com scripts combinados
-└── README.md                # Este ficheiro
-```
 
 ## 🚀 Quick Start
 
@@ -82,6 +38,8 @@ Blip/
 
 - **Node.js** (v18 ou superior)
 - **npm** (v9 ou superior)
+- **docker** 
+´´´bash winget install -e --id Docker.DockerDesktop´´´
 
 ### Instalação
 
@@ -109,6 +67,48 @@ npm run dev:backend
 
 # Terminal 2 — Frontend (http://localhost:5173)
 npm run dev:frontend
+```
+
+### PostgreSQL (opcional, recomendado)
+
+O backend já suporta persistência em PostgreSQL. Para ativar:
+
+```bash
+cd backend
+copy .env.example .env
+npm run db:up
+```
+
+Depois, no ficheiro `.env`, define:
+
+```env
+POSTGRES_ENABLED=true
+POSTGRES_RESET_ON_START=true
+```
+
+Configuração recomendada para throughput alto (ex.: 500 apostas/seg):
+
+```env
+POSTGRES_INSERT_CHUNK_SIZE=2000
+POSTGRES_FLUSH_INTERVAL_MS=200
+```
+
+Com esta configuração:
+- As 400k apostas iniciais são enfileiradas e gravadas em batch na BD
+- As apostas live também entram na mesma fila
+- O WebSocket não bloqueia à espera de writes SQL
+
+E inicia o backend normalmente:
+
+```bash
+npm run dev
+```
+
+Para desligar a base de dados local:
+
+```bash
+cd backend
+npm run db:down
 ```
 
 ### Gerar Dados Mock

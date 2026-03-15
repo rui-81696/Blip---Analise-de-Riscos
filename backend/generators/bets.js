@@ -4,10 +4,65 @@ import crypto from "crypto";
 import { getRandomEventSelection, getRandomOdd } from "./odds.js";
 import { INITIAL_COUNT } from "../config.js";
 
-export function generateBet() {
+export function randomDate(start, end) {
+  return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+}
+
+export function getDateRanges() {
+  const now = new Date();
+
+  return {
+    now,
+    last15minutes: new Date(now.getTime() - 15 * 60 * 1000),
+    oneHourAgo: new Date(now.getTime() - 60 * 60 * 1000),
+    twoHoursAgo: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+    lastDay: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+  };
+}
+
+function calculateRiskScore(stake, odds) {
+  let riskScore = 0;
+  let exposureRisk = 0;
+
+  const potentialLoss = stake * (odds - 1);
+
+  if (potentialLoss > 5000) exposureRisk = 95;
+  else if (potentialLoss > 2500) exposureRisk = 80;
+  else if (potentialLoss > 1000) exposureRisk = 60;
+  else if (potentialLoss > 500)  exposureRisk = 40;
+  else exposureRisk = Math.min((potentialLoss / 500) * 40, 35);
+
+  if (stake > 2000) riskScore += 40;
+  else if (stake > 1000) riskScore += 30;
+  else if (stake > 500)  riskScore += 20;
+  else if (stake > 100)  riskScore += 10;
+
+  if (odds > 20) riskScore += 30;
+  else if (odds > 10) riskScore += 20;
+  else if (odds < 1.15) riskScore += 25;
+
+  const combinedRisk = Math.min(
+    Math.round((riskScore * 0.3) + (exposureRisk * 0.7)),
+    100
+  );
+
+  return {
+    riskScore: combinedRisk,
+    exposureRisk: Math.round(exposureRisk),
+    potentialLoss: parseFloat(potentialLoss.toFixed(2)) // Útil para debug ou UI
+  };
+}
+
+export function generateBet({ isLive = false } = {}) {
   const { sport, event, betType, selection } = getRandomEventSelection();
   const odd = getRandomOdd(event, selection);
   const stake = +(5 + Math.random() * 495).toFixed(2);
+  const dateTime = getDateRanges();
+
+  const potentialPayout = parseFloat((stake * odd).toFixed(2));
+  const potentialProfit = parseFloat((potentialPayout - stake).toFixed(2));
+
+  const { riskScore, exposureRisk } = calculateRiskScore(stake, odd);
 
   return {
     id: crypto.randomUUID(),
@@ -17,6 +72,12 @@ export function generateBet() {
     selection,
     odd,
     stake,
+    // Bets live usam horário real; seed inicial usa janela aleatória de 24h.
+    timestamp: isLive ? dateTime.now : randomDate(dateTime.lastDay, dateTime.now),
+    potentialPayout,
+    potentialProfit,
+    riskScore,
+    exposureRisk,
   };
 }
 
@@ -26,21 +87,11 @@ export function generateInitialBets() {
 
   const bets = new Array(INITIAL_COUNT);
   for (let i = 0; i < INITIAL_COUNT; i++) {
-    bets[i] = generateBet();
+    bets[i] = generateBet({ isLive: false });
   }
 
   const elapsed = ((performance.now() - start) / 1000).toFixed(2);
   console.log(`Geradas em ${elapsed}s\n`);
-
-  // Mostrar 5 exemplos
-  console.log("─── Exemplos de apostas geradas ───");
-  for (let i = 0; i < 5; i++) {
-    const b = bets[i];
-    console.log(
-      `  [${b.sport}] ${b.event} | ${b.betType}: ${b.selection} | Odd: ${b.odd} | Stake: €${b.stake}`
-    );
-  }
-  console.log(`  ... e mais ${(INITIAL_COUNT - 5).toLocaleString()} apostas\n`);
 
   return bets;
 }

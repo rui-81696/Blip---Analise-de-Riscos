@@ -1,0 +1,13 @@
+{
+  "name": "blip-latency-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:latency": "playwright test e2e/latency.spec.js",
+    "test:latency:headed": "playwright test e2e/latency.spec.js --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.53.2",
+    "ws": "^8.18.0"
+  }
+}

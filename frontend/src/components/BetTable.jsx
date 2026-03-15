@@ -33,7 +33,7 @@ function BetTable({ bets, status, stats }) {
           </thead>
           <tbody>
             {bets.map((bet) => (
-              <tr key={bet.id}>
+              <tr key={bet.id} data-bet-id={bet.id}>
                 <td className="sport">{bet.sport}</td>
                 <td>{bet.event}</td>
                 <td>{bet.betType}</td>

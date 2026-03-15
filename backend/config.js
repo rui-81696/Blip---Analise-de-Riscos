@@ -7,5 +7,5 @@ export const INITIAL_COUNT = 400_000;
 export const CHUNK_SIZE = 10_000;
 
 // Streaming em tempo real (50 apostas × 10 vezes/seg = 500/seg)
-export const BETS_PER_BATCH = 5;
-export const INTERVAL_MS = 1000;
+export const BETS_PER_BATCH = 50;
+export const INTERVAL_MS = 100;
