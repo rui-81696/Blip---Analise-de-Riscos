@@ -20,18 +20,6 @@ O Blip Risk Analysis é uma aplicação Web que permite a analistas e operadores
 - **Monitorizar** métricas de risco em tempo real (lucro, perdas, exposição)
 - **Consultar** dados em linguagem natural via WebLLM (em desenvolvimento)
 
-## 🛠️ Stack Tecnológica
-
-| Componente | Tecnologia |
-|------------|-----------|
-| Frontend | React + Vite + SCSS |
-| Backend | Node.js + Express |
-| Base de Dados | POSTGREESQL |
-| IA/LLM | WebLLM (MLC) — client-side |
-| Testes | Playwright (E2E) |
-| Design | Figma |
-
-
 ## 🚀 Quick Start
 
 ### Pré-requisitos
@@ -39,7 +27,9 @@ O Blip Risk Analysis é uma aplicação Web que permite a analistas e operadores
 - **Node.js** (v18 ou superior)
 - **npm** (v9 ou superior)
 - **docker** 
-´´´bash winget install -e --id Docker.DockerDesktop´´´
+```bash
+ winget install -e --id Docker.DockerDesktop
+```
 
 ### Instalação
 
@@ -57,16 +47,6 @@ npm run install:all
 ```bash
 # Iniciar backend E frontend num único comando
 npm run dev
-```
-
-Ou em separado:
-
-```bash
-# Terminal 1 — Backend (http://localhost:3001)
-npm run dev:backend
-
-# Terminal 2 — Frontend (http://localhost:5173)
-npm run dev:frontend
 ```
 
 ### PostgreSQL (opcional, recomendado)
@@ -111,52 +91,20 @@ cd backend
 npm run db:down
 ```
 
-### Gerar Dados Mock
-
-Os dados são gerados automaticamente ao iniciar o backend pela primeira vez. Para regenerar:
-
-```bash
-cd backend
-npm run seed        # Gera 500 apostas
-npm run seed 1000   # Gera 1000 apostas
-```
-
 ### Executar Testes
 
 ```bash
 # Testes E2E (requer backend e frontend a correr)
 npm test
-
-# Testes com interface visual
-npm run test:ui
 ```
 
 ## 📡 API Endpoints
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| `GET` | `/api/health` | Health check |
 | `GET` | `/api/bets` | Listar apostas (paginado/filtrado) |
-| `GET` | `/api/bets/:id` | Detalhe de uma aposta |
-| `GET` | `/api/bets/sports/list` | Lista de desportos |
-| `GET` | `/api/bets/events/list` | Lista de eventos |
-| `GET` | `/api/metrics` | Métricas agregadas |
 
 Documentação completa em [`docs/api.md`](docs/api.md).
-
-## 📊 Modelo de Dados — Aposta
-
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `id` | UUID | Identificador único |
-| `userId` | string | ID anónimo do apostador |
-| `sport` | enum | football, basketball, tennis, etc. |
-| `event` | string | Nome do evento desportivo |
-| `amount` | number (€) | Valor apostado |
-| `odds` | number | Cotação |
-| `status` | enum | pending, won, lost, void |
-| `riskScore` | number (0-100) | Score de risco calculado |
-| `createdAt` | ISO 8601 | Data de criação |
 
 ## 📅 Cronograma
 
