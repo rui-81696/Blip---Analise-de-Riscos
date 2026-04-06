@@ -6,5 +6,96 @@
 
 h1 {
   font-size: 1.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  color: #fff;
+}
+
+/* 🎨 NOVO: Estilos dos filtros */
+.filters-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  background: linear-gradient(135deg, #1a2332 0%, #1f2a3a 100%);
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  border: 1px solid #2d3e52;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  
+  label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #a0aec0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  select,
+  input {
+    padding: 0.75rem 1rem;
+    background-color: #0f1419;
+    border: 1px solid #2d5a8a;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    min-width: 140px;
+
+    &:hover {
+      border-color: #3b7bc3;
+      box-shadow: 0 0 8px rgba(59, 123, 195, 0.15);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: #4a90e2;
+      box-shadow: 0 0 12px rgba(74, 144, 226, 0.3);
+    }
+
+    &::placeholder {
+      color: #64748b;
+    }
+  }
+
+  select {
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%234a90e2' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.5rem;
+    appearance: none;
+  }
+}
+
+/* 🎨 NOVO: Botão Limpar Filtros */
+.btn-clear {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0;
+  white-space: nowrap;
+
+  &:hover {
+    background: linear-gradient(135deg, #f54e4e 0%, #d43333 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
 }
