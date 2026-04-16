@@ -9,39 +9,63 @@
 
 .grouped-filters {
   display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.45rem;
   align-items: center;
-  padding: 1rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 0.75rem;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--card), transparent 20%);
 
+  .filter-item {
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .search-box {
+    flex: 1 1 280px;
+    min-width: 220px;
+    max-width: 340px;
+  }
+
+  .compact {
+    width: 132px;
+  }
+
+  .sport-select {
+    width: 180px;
+  }
+
+  .period-select {
+    width: 190px;
+  }
+
   input,
   select {
+    width: 100%;
     background: #101923;
     border: 1px solid var(--input-border);
     color: var(--foreground);
     border-radius: 8px;
-    padding: 0.6rem 0.75rem;
-    min-height: 40px;
+    padding: 0.42rem 0.55rem;
+    min-height: 32px;
+    font-size: 0.86rem;
   }
 
-  input {
-    min-width: 180px;
+  .btn-clear {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.78rem;
+    border-radius: 8px;
+    white-space: nowrap;
   }
 
-  select {
-    min-width: 170px;
-  }
-
-  .search-box {
-    flex: 1;
-    min-width: 220px;
-
-    input {
-      width: 100%;
-    }
+  .table-status {
+    margin-left: 0.2rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 }
 
@@ -172,8 +196,8 @@
   background: rgba(214, 142, 27, 0.1);
 }
 
-@media (max-width: 900px) {
-  .table-status {
-    margin-left: 0;
+@media (max-width: 760px) {
+  .grouped-filters {
+    gap: 0.4rem;
   }
 }

@@ -105,8 +105,12 @@ function SortButton({ label, field, sortField, sortOrder, onSort }) {
 export default function GroupedBetsTable() {
   const [searchText, setSearchText] = useState("")
   const [selectedSport, setSelectedSport] = useState("all")
+  const [minOdds, setMinOdds] = useState("")
+  const [maxOdds, setMaxOdds] = useState("")
+  const [minBets, setMinBets] = useState(0)
   const [minStake, setMinStake] = useState(0)
-  const [timeRange, setTimeRange] = useState(120)
+  const [maxStake, setMaxStake] = useState("")
+  const [timeRange, setTimeRange] = useState(-1)
   const [sortField, setSortField] = useState("totalExposure")
   const [sortOrder, setSortOrder] = useState("desc")
 
@@ -121,48 +125,44 @@ export default function GroupedBetsTable() {
   const reconnectTimerRef = useRef(null)
 
   const { groupedData, summary } = useMemo(() => {
-    const searchLower = searchText.trim().toLowerCase();
-    const nowMinuteKey = Math.floor(Date.now() / ONE_MINUTE_MS);
-    
-    // Define o limite de tempo
-    const minMinuteKey = timeRange === -1 
-      ? getTodayStartMinuteKey() 
-      : nowMinuteKey - Number(timeRange);
+    const searchLower = searchText.trim().toLowerCase()
+    const nowMinuteKey = Math.floor(Date.now() / ONE_MINUTE_MS)
 
-    const groupedMap = new Map();
+    const minMinuteKey = timeRange === -1 ? getTodayStartMinuteKey() : nowMinuteKey - Number(timeRange)
 
-    // Itera apenas sobre os minutos que estão dentro do filtro
+    const groupedMap = new Map()
+
     minuteBucketsRef.current.forEach((minuteGroups, minuteKey) => {
-      if (minuteKey < minMinuteKey) return;
+      if (minuteKey < minMinuteKey) return
 
       minuteGroups.forEach((sourceGroup, key) => {
-        // Filtros de UI
-        if (selectedSport !== "all" && sourceGroup.sport !== selectedSport) return;
-        if (sourceGroup.totalStake < minStake) return;
-        
+        if (selectedSport !== "all" && sourceGroup.sport !== selectedSport) return
+        if (minOdds !== "" && sourceGroup.odds < minOdds) return
+        if (maxOdds !== "" && sourceGroup.odds > maxOdds) return
+        if (sourceGroup.totalStake < minStake) return
+        if (maxStake !== "" && sourceGroup.totalStake > maxStake) return
+
         if (searchLower) {
-          const searchable = `${sourceGroup.event} ${sourceGroup.sport} ${sourceGroup.market} ${sourceGroup.selection}`.toLowerCase();
-          if (!searchable.includes(searchLower)) return;
+          const searchable = `${sourceGroup.event} ${sourceGroup.sport} ${sourceGroup.market} ${sourceGroup.selection}`.toLowerCase()
+          if (!searchable.includes(searchLower)) return
         }
 
-        const existing = groupedMap.get(key);
+        const existing = groupedMap.get(key)
         if (existing) {
-          mergeGroupAccumulator(existing, sourceGroup);
+          mergeGroupAccumulator(existing, sourceGroup)
         } else {
-          // Clonamos para não editar o objeto original que está no Ref
-          groupedMap.set(key, { ...sourceGroup });
+          groupedMap.set(key, { ...sourceGroup })
         }
-      });
-    });
+      })
+    })
 
-    const groups = Array.from(groupedMap.values());
+    const groups = Array.from(groupedMap.values()).filter((group) => group.betCount >= minBets)
 
-    // Ordenação
     groups.sort((a, b) => {
-      const left = getSortValue(a, sortField);
-      const right = getSortValue(b, sortField);
-      return sortOrder === "asc" ? left - right : right - left;
-    });
+      const left = getSortValue(a, sortField)
+      const right = getSortValue(b, sortField)
+      return sortOrder === "asc" ? left - right : right - left
+    })
 
     return {
       groupedData: groups.slice(0, MAX_GROUP_ROWS),
@@ -171,8 +171,8 @@ export default function GroupedBetsTable() {
         totalBets: groups.reduce((acc, g) => acc + g.betCount, 0),
         totalExposure: groups.reduce((acc, g) => acc + g.totalExposure, 0),
       },
-    };
-  }, [dataVersion, minStake, searchText, selectedSport, sortField, sortOrder, timeRange]);
+    }
+  }, [dataVersion, maxOdds, maxStake, minBets, minOdds, minStake, searchText, selectedSport, sortField, sortOrder, timeRange])
 
   useEffect(() => {
     let ws = null
@@ -190,54 +190,50 @@ export default function GroupedBetsTable() {
     }
 
     const ingestBets = (bets) => {
-    if (!Array.isArray(bets) || bets.length === 0) return;
+      if (!Array.isArray(bets) || bets.length === 0) return
 
-    for (const rawBet of bets) {
-      const bet = normalizeBet(rawBet);
-      
-      // Validação de ID (agora aceita Number ou String)
-      if (bet.id === undefined || bet.id === null || seenIdsRef.current.has(bet.id)) continue;
+      for (const rawBet of bets) {
+        const bet = normalizeBet(rawBet)
 
-      const minuteKey = getMinuteKey(bet.timestamp);
-      if (Number.isNaN(minuteKey)) continue;
+        if (bet.id === undefined || bet.id === null || seenIdsRef.current.has(bet.id)) continue
 
-      // Lógica de Limpeza Automática: 
-      // Se tivermos mais de 24h de dados em memória, removemos o mais antigo
-      if (minuteBucketsRef.current.size > 1440) { 
-        const oldestKey = Math.min(...minuteBucketsRef.current.keys());
-        minuteBucketsRef.current.delete(oldestKey);
-      }
+        const minuteKey = getMinuteKey(bet.timestamp)
+        if (Number.isNaN(minuteKey)) continue
 
-      let minuteGroups = minuteBucketsRef.current.get(minuteKey);
-      if (!minuteGroups) {
-        minuteGroups = new Map();
-        minuteBucketsRef.current.set(minuteKey, minuteGroups);
-      }
-
-      // Chave de agrupamento: incluímos a Odd para agrupar apenas apostas idênticas
-      const groupKey = `${bet.sport}|${bet.event}|${bet.betType}|${bet.selection}|${bet.odd.toFixed(2)}`;
-      const existing = minuteGroups.get(groupKey);
-
-      if (existing) {
-        existing.betCount += 1;
-        existing.totalStake += bet.stake;
-        existing.totalExposure += bet.potentialProfit;
-        const betTsMs = new Date(bet.timestamp).getTime();
-        if (betTsMs > existing.lastBetTsMs) {
-          existing.lastBetTsMs = betTsMs;
-          existing.lastBetPlacedAt = bet.timestamp;
+        if (minuteBucketsRef.current.size > 1440) {
+          const oldestKey = Math.min(...minuteBucketsRef.current.keys())
+          minuteBucketsRef.current.delete(oldestKey)
         }
-      } else {
-        minuteGroups.set(groupKey, createGroupAccumulatorFromBet(bet));
+
+        let minuteGroups = minuteBucketsRef.current.get(minuteKey)
+        if (!minuteGroups) {
+          minuteGroups = new Map()
+          minuteBucketsRef.current.set(minuteKey, minuteGroups)
+        }
+
+        const groupKey = `${bet.sport}|${bet.event}|${bet.betType}|${bet.selection}|${bet.odd.toFixed(2)}`
+        const existing = minuteGroups.get(groupKey)
+
+        if (existing) {
+          existing.betCount += 1
+          existing.totalStake += bet.stake
+          existing.totalExposure += bet.potentialProfit
+          const betTsMs = new Date(bet.timestamp).getTime()
+          if (betTsMs > existing.lastBetTsMs) {
+            existing.lastBetTsMs = betTsMs
+            existing.lastBetPlacedAt = bet.timestamp
+          }
+        } else {
+          minuteGroups.set(groupKey, createGroupAccumulatorFromBet(bet))
+        }
+
+        seenIdsRef.current.add(bet.id)
+        if (bet.sport) sportSetRef.current.add(bet.sport)
       }
 
-      seenIdsRef.current.add(bet.id);
-      if (bet.sport) sportSetRef.current.add(bet.sport);
+      setSports(["all", ...Array.from(sportSetRef.current).sort()])
+      scheduleRefresh()
     }
-
-    setSports(["all", ...Array.from(sportSetRef.current).sort()]);
-    scheduleRefresh();
-  };
 
     const connect = () => {
       if (isUnmounting) {
@@ -311,42 +307,111 @@ export default function GroupedBetsTable() {
     setSortOrder("desc")
   }
 
+  function clearFilters() {
+    setSearchText("")
+    setSelectedSport("all")
+    setMinOdds("")
+    setMaxOdds("")
+    setMinBets(0)
+    setMinStake(0)
+    setMaxStake("")
+    setTimeRange(-1)
+  }
+
   return (
     <div className="grouped-bets-view">
       <h1>Análise de Riscos - Apostas Agrupadas</h1>
 
       <div className="grouped-filters">
-        <div className="search-box">
+        <div className="filter-item search-box">
           <input
+            id="searchText"
             type="text"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Pesquisar evento, mercado, seleção, desporto ou ID"
+            placeholder="Pesquisar ID"
           />
         </div>
 
-        <select value={timeRange} onChange={(e) => setTimeRange(Number(e.target.value))}>
-          <option value={15}>Últimos 15 min</option>
-          <option value={60}>Última 1 hora</option>
-          <option value={120}>Últimas 2 horas</option>
-          <option value={-1}>Hoje</option>
-        </select>
+        <div className="filter-item compact sport-select">
+          <select id="sportSelect" value={selectedSport} onChange={(e) => setSelectedSport(e.target.value)}>
+            {sports.map((sport) => (
+              <option key={sport} value={sport}>
+                {sport === "all" ? "Desporto: Todos" : sport}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <select value={selectedSport} onChange={(e) => setSelectedSport(e.target.value)}>
-          {sports.map((sport) => (
-            <option key={sport} value={sport}>
-              {sport === "all" ? "Todos os desportos" : sport}
-            </option>
-          ))}
-        </select>
+        <div className="filter-item compact">
+          <input
+            id="minOdds"
+            type="number"
+            value={minOdds}
+            onChange={(e) => setMinOdds(e.target.value === "" ? "" : Number(e.target.value))}
+            min="1"
+            step="0.1"
+            placeholder="Odds Mín"
+          />
+        </div>
 
-        <input
-          type="number"
-          value={minStake || ""}
-          onChange={(e) => setMinStake(Number(e.target.value) || 0)}
-          placeholder="Stake mínima (€)"
-          min="0"
-        />
+        <div className="filter-item compact">
+          <input
+            id="maxOdds"
+            type="number"
+            value={maxOdds}
+            onChange={(e) => setMaxOdds(e.target.value === "" ? "" : Number(e.target.value))}
+            min="1"
+            step="0.1"
+            placeholder="Odds Máx"
+          />
+        </div>
+
+        <div className="filter-item compact">
+          <input
+            id="minBets"
+            type="number"
+            value={minBets || ""}
+            onChange={(e) => setMinBets(Number(e.target.value) || 0)}
+            min="0"
+            placeholder="Apostas Mín"
+          />
+        </div>
+
+        <div className="filter-item compact">
+          <input
+            id="minStake"
+            type="number"
+            value={minStake || ""}
+            onChange={(e) => setMinStake(Number(e.target.value) || 0)}
+            min="0"
+            placeholder="Stake Mín (€)"
+          />
+        </div>
+
+        <div className="filter-item compact">
+          <input
+            id="maxStake"
+            type="number"
+            value={maxStake}
+            onChange={(e) => setMaxStake(e.target.value === "" ? "" : Number(e.target.value))}
+            min="0"
+            placeholder="Stake Máx (€)"
+          />
+        </div>
+
+        <div className="filter-item compact period-select">
+          <select id="timeRange" value={timeRange} onChange={(e) => setTimeRange(Number(e.target.value))}>
+            <option value={15}>Período: 15 min</option>
+            <option value={60}>Período: 1 hora</option>
+            <option value={120}>Período: 2 horas</option>
+            <option value={-1}>Período: Hoje</option>
+          </select>
+        </div>
+
+        <button type="button" className="btn-clear" onClick={clearFilters}>
+          Limpar
+        </button>
 
         <div className={`table-status ${status}`}>
           {status === "open" ? "● Ligado" : status === "connecting" ? "◌ A ligar" : "○ Desligado"}
