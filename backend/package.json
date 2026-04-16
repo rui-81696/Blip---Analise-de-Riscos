@@ -5,7 +5,9 @@
     "dev": "node index.js",
     "start": "node index.js",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "cleanup:demo:dry": "node db/cleanup-demo.js --dry-run",
+    "cleanup:demo:delete": "node db/cleanup-demo.js --delete"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

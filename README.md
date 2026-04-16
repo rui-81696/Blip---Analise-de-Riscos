@@ -63,7 +63,7 @@ Depois, no ficheiro `.env`, define:
 
 ```env
 POSTGRES_ENABLED=true
-POSTGRES_RESET_ON_START=true
+POSTGRES_RESET_ON_START=false
 ```
 
 Configuração recomendada para throughput alto (ex.: 500 apostas/seg):
@@ -74,9 +74,36 @@ POSTGRES_FLUSH_INTERVAL_MS=200
 ```
 
 Com esta configuração:
-- As 400k apostas iniciais são enfileiradas e gravadas em batch na BD
+- As 400k apostas iniciais só são geradas quando a tabela `bets` está vazia
+- Em reinícios com dados existentes, a seed é ignorada e os dados persistidos são reutilizados
 - As apostas live também entram na mesma fila
 - O WebSocket não bloqueia à espera de writes SQL
+
+### Fluxo de Seed Persistente + Live
+
+1. Primeiro arranque com `bets` vazia:
+- Gera ~400.000 apostas iniciais (timestamps em janela das últimas 24h)
+- Enfileira para persistência PostgreSQL
+- Inicia streaming live (~500/s)
+
+2. Arranques seguintes sem reset:
+- Não gera seed novamente
+- Reutiliza histórico existente
+- Continua com append live
+
+3. Cutoff para cleanup de demo:
+- No arranque, o backend grava `backend/db/demo-cutoff.json`
+- Esse timestamp marca o início da fase live da demo
+
+4. Cleanup no final da demo:
+
+```bash
+cd backend
+npm run cleanup:demo:dry
+npm run cleanup:demo:delete
+```
+
+Por default, o cleanup usa `timestamp > cutoff`, removendo apenas apostas live após o início da demo e preservando a seed inicial.
 
 E inicia o backend normalmente:
 

@@ -53,7 +53,7 @@ function calculateRiskScore(stake, odds) {
   };
 }
 
-export function generateBet({ isLive = false } = {}) {
+export function generateBet({nextId, isLive = false } = {}) {
   const { sport, event, betType, selection } = getRandomEventSelection();
   const odd = getRandomOdd(event, selection);
   const stake = +(5 + Math.random() * 495).toFixed(2);
@@ -65,7 +65,7 @@ export function generateBet({ isLive = false } = {}) {
   const { riskScore, exposureRisk } = calculateRiskScore(stake, odd);
 
   return {
-    id: crypto.randomUUID(),
+    id: nextId,
     sport,
     event,
     betType,
@@ -81,13 +81,14 @@ export function generateBet({ isLive = false } = {}) {
   };
 }
 
-export function generateInitialBets() {
+export async function generateInitialBets() {
   console.log(`A gerar ${INITIAL_COUNT.toLocaleString()} apostas iniciais...`);
   const start = performance.now();
 
   const bets = new Array(INITIAL_COUNT);
   for (let i = 0; i < INITIAL_COUNT; i++) {
-    bets[i] = generateBet({ isLive: false });
+    const nextId = i + 1;
+    bets[i] = generateBet({ nextId: nextId, isLive: false });
   }
 
   const elapsed = ((performance.now() - start) / 1000).toFixed(2);

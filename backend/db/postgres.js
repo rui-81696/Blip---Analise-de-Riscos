@@ -13,7 +13,7 @@ const {
   POSTGRES_USER = "postgres",
   POSTGRES_PASSWORD = "postgres",
   POSTGRES_SSL = "false",
-  POSTGRES_RESET_ON_START = "true",
+  POSTGRES_RESET_ON_START = "false",
   POSTGRES_INSERT_CHUNK_SIZE = "2000",
   POSTGRES_FLUSH_INTERVAL_MS = "100",
 } = process.env;
@@ -78,8 +78,7 @@ function buildInsertQuery(bets) {
         potential_profit,
         risk_score,
         exposure_risk
-      ) VALUES ${placeholders.join(", ")}
-      ON CONFLICT (id) DO NOTHING;
+      ) VALUES ${placeholders.join(", ")};
     `,
     values,
   };
@@ -108,7 +107,7 @@ export async function initPostgres() {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bets (
-      id UUID PRIMARY KEY,
+      id BIGINT PRIMARY KEY,
       sport TEXT NOT NULL,
       event TEXT NOT NULL,
       bet_type TEXT NOT NULL,
@@ -132,6 +131,8 @@ export async function initPostgres() {
   if (postgresResetOnStart) {
     await pool.query("TRUNCATE TABLE bets;");
     console.log("Tabela bets limpa no arranque (POSTGRES_RESET_ON_START=true).");
+  } else {
+    console.log("Tabela bets preservada no arranque (POSTGRES_RESET_ON_START=false).");
   }
 
   console.log("PostgreSQL ligado com sucesso.");
@@ -249,6 +250,88 @@ export async function getLatestBets({ limit = 200, offset = 0 } = {}) {
   };
 }
 
+export async function getBetsCount() {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS total FROM bets");
+  return rows[0]?.total ?? 0;
+}
+
+export async function getInitialSyncBets({ limit = 400000 } = {}) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 400000, 1), 400000);
+
+  const { rows } = await pool.query(`
+    SELECT
+      id,
+      sport,
+      event,
+      bet_type AS "betType",
+      selection,
+      odd::float8 AS odd,
+      stake::float8 AS stake,
+      risk_score AS "riskScore",
+      exposure_risk AS "exposureRisk",
+      timestamp,
+      potential_payout AS "potentialPayout",
+      potential_profit AS "potentialProfit"
+    FROM bets
+    ORDER BY timestamp DESC
+    LIMIT $1
+  `, [safeLimit]);
+
+  return rows;
+}
+
+function getCleanupField(field) {
+  if (field === "created_at") {
+    return "created_at";
+  }
+
+  return "timestamp";
+}
+
+export async function countBetsAfterCutoff({ cutoffIso, field = "timestamp" }) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  if (!cutoffIso) {
+    throw new Error("cutoffIso é obrigatório.");
+  }
+
+  const cleanupField = getCleanupField(field);
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM bets WHERE ${cleanupField} > $1::timestamptz`,
+    [cutoffIso]
+  );
+
+  return rows[0]?.total ?? 0;
+}
+
+export async function deleteBetsAfterCutoff({ cutoffIso, field = "timestamp" }) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  if (!cutoffIso) {
+    throw new Error("cutoffIso é obrigatório.");
+  }
+
+  const cleanupField = getCleanupField(field);
+  const { rowCount } = await pool.query(
+    `DELETE FROM bets WHERE ${cleanupField} > $1::timestamptz`,
+    [cutoffIso]
+  );
+
+  return rowCount ?? 0;
+}
+
 export async function getBetById(id) {
   if (!pool) {
     throw new Error("PostgreSQL não está inicializado.");
@@ -276,4 +359,146 @@ export async function getBetById(id) {
   );
 
   return result.rows[0] ?? null;
+}
+
+export async function getGroupedBets({
+  search = "",
+  sport = "all",
+  minStake = 0,
+  timeRange = 120,
+  sortField = "totalExposure",
+  sortOrder = "desc",
+  limit = 500,
+  offset = 0,
+} = {}) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const params = [];
+  const whereClauses = [];
+
+  const safeTimeRange = Number(timeRange);
+
+  if (safeTimeRange === -1) {
+    whereClauses.push("timestamp >= date_trunc('day', now())");
+  } else {
+    const minutes = Math.min(Math.max(Number(timeRange) || 120, 1), 24 * 60);
+    params.push(minutes);
+    whereClauses.push(`timestamp >= now() - ($${params.length} * interval '1 minute')`);
+  }
+
+  if (sport && sport !== "all") {
+    params.push(sport);
+    whereClauses.push(`sport = $${params.length}`);
+  }
+
+  const safeMinStake = Math.max(Number(minStake) || 0, 0);
+  if (safeMinStake > 0) {
+    params.push(safeMinStake);
+    whereClauses.push(`stake >= $${params.length}`);
+  }
+
+  const safeSearch = search.trim();
+  if (safeSearch) {
+    params.push(`%${safeSearch}%`);
+    whereClauses.push(`(
+      event ILIKE $${params.length}
+      OR sport ILIKE $${params.length}
+      OR bet_type ILIKE $${params.length}
+      OR selection ILIKE $${params.length}
+      OR id::text ILIKE $${params.length}
+    )`);
+  }
+
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+  const sortFieldMap = {
+    betCount: "bet_count",
+    totalStake: "total_stake",
+    totalExposure: "total_exposure",
+    lastBetPlacedAt: "last_bet_placed_at",
+    odds: "odds",
+  };
+
+  const safeSortField = sortFieldMap[sortField] ?? "total_exposure";
+  const safeSortOrder = String(sortOrder).toLowerCase() === "asc" ? "ASC" : "DESC";
+  const safeLimit = Math.min(Math.max(Number(limit) || 500, 1), 1000);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+
+  const summaryQuery = `
+    WITH grouped AS (
+      SELECT
+        sport,
+        event,
+        bet_type AS market,
+        selection,
+        odd::float8 AS odds,
+        COUNT(*)::int AS bet_count,
+        SUM(stake)::float8 AS total_stake,
+        SUM(potential_profit)::float8 AS total_exposure,
+        MAX(timestamp) AS last_bet_placed_at
+      FROM bets
+      ${whereSql}
+      GROUP BY sport, event, bet_type, selection, odd
+    )
+    SELECT
+      COUNT(*)::int AS total_groups,
+      COALESCE(SUM(bet_count), 0)::int AS total_bets,
+      COALESCE(SUM(total_exposure), 0)::float8 AS total_exposure
+    FROM grouped
+  `;
+
+  const rowsQueryParams = [...params, safeLimit, safeOffset];
+  const rowsQuery = `
+    WITH grouped AS (
+      SELECT
+        sport,
+        event,
+        bet_type AS market,
+        selection,
+        odd::float8 AS odds,
+        COUNT(*)::int AS bet_count,
+        SUM(stake)::float8 AS total_stake,
+        SUM(potential_profit)::float8 AS total_exposure,
+        MAX(timestamp) AS last_bet_placed_at
+      FROM bets
+      ${whereSql}
+      GROUP BY sport, event, bet_type, selection, odd
+    )
+    SELECT
+      sport,
+      event,
+      market,
+      selection,
+      odds,
+      bet_count,
+      total_stake,
+      total_exposure,
+      last_bet_placed_at
+    FROM grouped
+    ORDER BY ${safeSortField} ${safeSortOrder}
+    LIMIT $${rowsQueryParams.length - 1} OFFSET $${rowsQueryParams.length}
+  `;
+
+  const [{ rows: summaryRows }, { rows }] = await Promise.all([
+    pool.query(summaryQuery, params),
+    pool.query(rowsQuery, rowsQueryParams),
+  ]);
+  console.log(`Obtidos ${rows.length} grupos de apostas do PostgreSQL (total grupos: ${summaryRows[0]?.total_groups ?? 0}, total bets: ${summaryRows[0]?.total_bets ?? 0}).`);
+
+  return {
+    totalGroups: summaryRows[0]?.total_groups ?? 0,
+    totalBets: summaryRows[0]?.total_bets ?? 0,
+    totalExposure: summaryRows[0]?.total_exposure ?? 0,
+    groups: rows,
+    limit: safeLimit,
+    offset: safeOffset,
+  };
+}
+
+export async function getMaxId() {
+  if (!pool) return 0;
+  const { rows } = await pool.query("SELECT MAX(id) AS max_id FROM bets");
+  return parseInt(rows[0].max_id) || 0;
 }

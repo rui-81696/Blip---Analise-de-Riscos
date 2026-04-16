@@ -9,14 +9,21 @@
 
 import express from "express";
 import { createServer } from "http";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
-import { PORT, CHUNK_SIZE, BETS_PER_BATCH, INTERVAL_MS } from "./config.js";
+import { PORT, CHUNK_SIZE, BETS_PER_BATCH, INTERVAL_MS, INITIAL_COUNT } from "./config.js";
 import { allEventSelections, oddsMap } from "./generators/odds.js";
 import { generateBet, generateInitialBets } from "./generators/bets.js";
 import {
+  getBetsCount,
+  getMaxId,
   enqueueBets,
   flushAndClosePostgres,
   getBetById,
+  getGroupedBets,
+  getInitialSyncBets,
   getLatestBets,
   initPostgres,
   isPostgresEnabled,
@@ -31,7 +38,41 @@ import {
 const app = express();
 const server = createServer(app);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DEMO_CUTOFF_FILE = path.join(__dirname, "db", "demo-cutoff.json");
+
 let initialBets = [];
+let globalNextId = 0;
+
+async function sendInitialBetsInChunks(ws, bets) {
+  for (let i = 0; i < bets.length; i += CHUNK_SIZE) {
+    if (ws.readyState !== ws.OPEN) {
+      return false;
+    }
+
+    const chunk = bets.slice(i, i + CHUNK_SIZE);
+
+    await new Promise((resolve, reject) => {
+      ws.send(JSON.stringify({ type: "initial", bets: chunk }), (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    if (ws.bufferedAmount > 8 * 1024 * 1024) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+  }
+
+  return true;
+}
 
 // Rota básica para confirmar que o servidor está vivo
 app.get("/", (req, res) => {
@@ -59,6 +100,34 @@ app.get("/api/bets", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: "Falha ao obter apostas da base de dados.",
+      detail: error.message,
+    });
+  }
+});
+
+app.get("/api/bets/grouped", async (req, res) => {
+  if (!isPostgresEnabled()) {
+    return res.status(503).json({
+      error: "PostgreSQL está desativado. Ativa POSTGRES_ENABLED=true para usar este endpoint.",
+    });
+  }
+
+  try {
+    const data = await getGroupedBets({
+      search: req.query.search,
+      sport: req.query.sport,
+      minStake: req.query.minStake,
+      timeRange: req.query.timeRange,
+      sortField: req.query.sortField,
+      sortOrder: req.query.sortOrder,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+
+    return res.json(data);
+  } catch (error) {
+    return res.status(500).json({
+      error: "Falha ao obter grupos de apostas da base de dados.",
       detail: error.message,
     });
   }
@@ -102,13 +171,18 @@ wss.on("connection", (ws) => {
   console.log("Cliente WebSocket conectado!");
   ws.isInitialSyncDone = false;
 
-  // 1) Enviar apostas iniciais em blocos de CHUNK_SIZE
-  for (let i = 0; i < initialBets.length; i += CHUNK_SIZE) {
-    const chunk = initialBets.slice(i, i + CHUNK_SIZE);
-    ws.send(JSON.stringify({ type: "initial", bets: chunk }));
-  }
-  ws.isInitialSyncDone = true;
-  console.log("Apostas iniciais enviadas.\n");
+  sendInitialBetsInChunks(ws, initialBets)
+    .then((completed) => {
+      if (!completed) {
+        return;
+      }
+
+      ws.isInitialSyncDone = true;
+      console.log("Apostas iniciais enviadas.\n");
+    })
+    .catch((error) => {
+      console.error("Erro ao enviar sync inicial via WebSocket:", error.message);
+    });
 
   ws.on("close", () => {
     console.log("Cliente WebSocket desconectado.");
@@ -120,7 +194,8 @@ function startLiveStreaming() {
     const batch = [];
 
     for (let i = 0; i < BETS_PER_BATCH; i++) {
-      batch.push(generateBet({ isLive: true }));
+      globalNextId++;
+      batch.push(generateBet({ nextId: globalNextId, isLive: true }));
     }
 
     const payload = JSON.stringify({ type: "live", bets: batch });
@@ -135,6 +210,17 @@ function startLiveStreaming() {
       enqueueBets(batch);
     }
   }, INTERVAL_MS);
+}
+
+async function persistDemoCutoff(cutoffDate, metadata = {}) {
+  const payload = {
+    cutoffIso: cutoffDate.toISOString(),
+    recordedAtIso: new Date().toISOString(),
+    ...metadata,
+  };
+
+  await mkdir(path.dirname(DEMO_CUTOFF_FILE), { recursive: true });
+  await writeFile(DEMO_CUTOFF_FILE, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
 let isShuttingDown = false;
@@ -170,15 +256,44 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 try {
   await initPostgres();
 
-  initialBets = generateInitialBets();
-
   if (isPostgresEnabled()) {
     startPostgresPersistenceWorker();
-    enqueueBets(initialBets);
-    console.log(`Apostas iniciais enfileiradas para persistência (${initialBets.length.toLocaleString()}).`);
+
+    // 3. Sincronizar o contador com o banco de dados
+    const lastId = await getMaxId(); 
+    globalNextId = lastId;
+
+    const currentCount = await getBetsCount();
+
+    if (currentCount === 0) {
+      console.log("Seed inicial ativada: tabela bets vazia.");
+      initialBets = await generateInitialBets();
+
+      // Atualizar o globalNextId após o seed para que o Live comece depois dele
+      globalNextId = initialBets.length > 0 ? initialBets[initialBets.length - 1].id : 0;
+
+      enqueueBets(initialBets);
+      console.log(`Apostas iniciais enfileiradas para persistência (${initialBets.length.toLocaleString()}).`);
+    } else {
+      console.log(`Seed inicial ignorada: já existem ${currentCount.toLocaleString()} registos em bets.`);
+      initialBets = await getInitialSyncBets({ limit: INITIAL_COUNT });
+      console.log(`Apostas carregadas da base de dados para initial sync WS (${initialBets.length.toLocaleString()}).`);
+    }
+
+    const liveCutoff = new Date();
+    await persistDemoCutoff(liveCutoff, {
+      reason: "startup-live-cutoff",
+      existingCountBeforeSeedDecision: currentCount,
+      seedExecuted: currentCount === 0,
+    });
+    console.log(`Cutoff da demo registado para cleanup de live: ${liveCutoff.toISOString()}`);
+  } else {
+    initialBets = [];
+    console.warn("PostgreSQL desativado: seed de 400k não será executada e o initial sync WS inicia vazio.");
   }
 
   startLiveStreaming();
+  console.log(`Streaming live ativo (~${Math.round((BETS_PER_BATCH * 1000) / INTERVAL_MS)} apostas/segundo).`);
 
   server.listen(PORT, () => {
     console.log(`\nServidor a correr na porta ${PORT}`);
