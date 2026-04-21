@@ -3,8 +3,25 @@ import "./GroupedBetsTable.scss"
 
 const REFRESH_THROTTLE_MS = 1000
 const WS_RECONNECT_DELAY_MS = 1000
+const FILTER_DEBOUNCE_MS = 300
 const MAX_GROUP_ROWS = 500
 const ONE_MINUTE_MS = 60 * 1000
+
+function useDebouncedValue(value, delayMs) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delayMs)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [delayMs, value])
+
+  return debouncedValue
+}
 
 function getMinuteKey(timestamp) {
   return Math.floor(new Date(timestamp).getTime() / ONE_MINUTE_MS)
@@ -118,6 +135,15 @@ export default function GroupedBetsTable() {
   const [status, setStatus] = useState("connecting")
   const [dataVersion, setDataVersion] = useState(0)
 
+  const debouncedSearchText = useDebouncedValue(searchText, FILTER_DEBOUNCE_MS)
+  const debouncedSelectedSport = useDebouncedValue(selectedSport, FILTER_DEBOUNCE_MS)
+  const debouncedMinOdds = useDebouncedValue(minOdds, FILTER_DEBOUNCE_MS)
+  const debouncedMaxOdds = useDebouncedValue(maxOdds, FILTER_DEBOUNCE_MS)
+  const debouncedMinBets = useDebouncedValue(minBets, FILTER_DEBOUNCE_MS)
+  const debouncedMinStake = useDebouncedValue(minStake, FILTER_DEBOUNCE_MS)
+  const debouncedMaxStake = useDebouncedValue(maxStake, FILTER_DEBOUNCE_MS)
+  const debouncedTimeRange = useDebouncedValue(timeRange, FILTER_DEBOUNCE_MS)
+
   const minuteBucketsRef = useRef(new Map())
   const seenIdsRef = useRef(new Set())
   const sportSetRef = useRef(new Set())
@@ -125,10 +151,10 @@ export default function GroupedBetsTable() {
   const reconnectTimerRef = useRef(null)
 
   const { groupedData, summary } = useMemo(() => {
-    const searchLower = searchText.trim().toLowerCase()
+    const searchLower = debouncedSearchText.trim().toLowerCase()
     const nowMinuteKey = Math.floor(Date.now() / ONE_MINUTE_MS)
 
-    const minMinuteKey = timeRange === -1 ? getTodayStartMinuteKey() : nowMinuteKey - Number(timeRange)
+    const minMinuteKey = debouncedTimeRange === -1 ? getTodayStartMinuteKey() : nowMinuteKey - Number(debouncedTimeRange)
 
     const groupedMap = new Map()
 
@@ -136,11 +162,11 @@ export default function GroupedBetsTable() {
       if (minuteKey < minMinuteKey) return
 
       minuteGroups.forEach((sourceGroup, key) => {
-        if (selectedSport !== "all" && sourceGroup.sport !== selectedSport) return
-        if (minOdds !== "" && sourceGroup.odds < minOdds) return
-        if (maxOdds !== "" && sourceGroup.odds > maxOdds) return
-        if (sourceGroup.totalStake < minStake) return
-        if (maxStake !== "" && sourceGroup.totalStake > maxStake) return
+        if (debouncedSelectedSport !== "all" && sourceGroup.sport !== debouncedSelectedSport) return
+        if (debouncedMinOdds !== "" && sourceGroup.odds < debouncedMinOdds) return
+        if (debouncedMaxOdds !== "" && sourceGroup.odds > debouncedMaxOdds) return
+        if (sourceGroup.totalStake < debouncedMinStake) return
+        if (debouncedMaxStake !== "" && sourceGroup.totalStake > debouncedMaxStake) return
 
         if (searchLower) {
           const searchable = `${sourceGroup.event} ${sourceGroup.sport} ${sourceGroup.market} ${sourceGroup.selection}`.toLowerCase()
@@ -156,7 +182,7 @@ export default function GroupedBetsTable() {
       })
     })
 
-    const groups = Array.from(groupedMap.values()).filter((group) => group.betCount >= minBets)
+    const groups = Array.from(groupedMap.values()).filter((group) => group.betCount >= debouncedMinBets)
 
     groups.sort((a, b) => {
       const left = getSortValue(a, sortField)
@@ -172,7 +198,19 @@ export default function GroupedBetsTable() {
         totalExposure: groups.reduce((acc, g) => acc + g.totalExposure, 0),
       },
     }
-  }, [dataVersion, maxOdds, maxStake, minBets, minOdds, minStake, searchText, selectedSport, sortField, sortOrder, timeRange])
+  }, [
+    dataVersion,
+    debouncedMaxOdds,
+    debouncedMaxStake,
+    debouncedMinBets,
+    debouncedMinOdds,
+    debouncedMinStake,
+    debouncedSearchText,
+    debouncedSelectedSport,
+    debouncedTimeRange,
+    sortField,
+    sortOrder,
+  ])
 
   useEffect(() => {
     let ws = null
