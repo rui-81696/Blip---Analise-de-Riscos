@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "test:latency": "playwright test e2e/latency.spec.js",
-    "test:latency:headed": "playwright test e2e/latency.spec.js --headed"
+    "test:latency:headed": "playwright test e2e/latency.spec.js --headed",
+    "test:webllm": "playwright test e2e/webllm.spec.js",
+    "test:webllm:headed": "playwright test e2e/webllm.spec.js --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.2",

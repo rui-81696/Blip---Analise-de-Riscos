@@ -127,11 +127,67 @@ npm test
 
 ## 📡 API Endpoints
 
+### Bets (dados brutos)
+
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| `GET` | `/api/bets` | Listar apostas (paginado/filtrado) |
+| `GET` | `/api/bets` | Listar apostas (paginado, últimas 200) |
+| `GET` | `/api/bets/:id` | Obter aposta por ID |
+| `GET` | `/api/bets/grouped` | Listar apostas agrupadas por evento/seleção |
+
+### Stats (estatísticas analíticas)
+
+| Método | Endpoint | Query Params | Descrição |
+|--------|----------|--------------|-----------|
+| `GET` | `/api/stats/summary` | `period` (1h, 24h, 7d, today) | Resumo geral: total apostas, stake, exposição |
+| `GET` | `/api/stats/by-sport` | `period`, `limit`, `sort` | Estatísticas agrupadas por desporto |
+| `GET` | `/api/stats/by-period` | `from`, `to`, `granularity` | Série temporal de estatísticas |
+| `GET` | `/api/stats/by-risk` | `period` | Distribuição de risco por bucket (low/medium/high/critical) |
+
+### Assistant (consultas em linguagem natural)
+
+| Método | Endpoint | Body | Descrição |
+|--------|----------|------|-----------|
+| `POST` | `/api/assistant/query` | `{ intent, params }` | Processa query estruturada do assistant |
+
+Exemplo de body:
+```json
+{
+  "intent": "by-sport",
+  "params": { "period": "24h", "limit": 100 }
+}
+```
+
+Respostas incluem `{ data, explanation }` com dados estruturados + explicação textual.
+
+### WebSocket (dados live)
+
+| URL | Mensagem | Descrição |
+|-----|----------|-----------|
+| `ws://localhost:3001/ws` | `{ type: "initial", bets: [...] }` | Sincronização inicial com histórico |
+| `ws://localhost:3001/ws` | `{ type: "live", bets: [...] }` | Novos dados de apostas em tempo real |
 
 Documentação completa em [`docs/api.md`](docs/api.md).
+
+---
+
+## ⚙️ Configuração de Geração de Apostas
+
+Para facilitar testes e estudos, a taxa de geração de apostas foi reduzida:
+
+**Configuração atual (`backend/config.js`):**
+- `INITIAL_COUNT = 1_000` (seed inicial reduzida)
+- `BETS_PER_BATCH = 10` (10 apostas por batch)
+- `INTERVAL_MS = 60_000` (1 minuto entre batches)
+- **Taxa efetiva: ~10 apostas/minuto (~0.17 apostas/segundo)**
+
+**Antes (configuração antiga):**
+- `INITIAL_COUNT = 400_000`
+- `BETS_PER_BATCH = 50`
+- `INTERVAL_MS = 100`
+- Taxa efetiva: ~500 apostas/segundo
+
+Para alterar, edita `backend/config.js` e reinicia o backend.
 
 ## 📅 Cronograma
 

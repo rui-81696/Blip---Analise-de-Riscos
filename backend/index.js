@@ -21,14 +21,15 @@ import {
   getMaxId,
   enqueueBets,
   flushAndClosePostgres,
-  getBetById,
-  getGroupedBets,
   getInitialSyncBets,
-  getLatestBets,
   initPostgres,
   isPostgresEnabled,
   startPostgresPersistenceWorker,
 } from "./db/postgres.js";
+import betsRouter from "./routes/bets.js";
+import rootRouter from "./routes/root.js";
+import statsRouter from "./routes/stats.js";
+import assistantRouter from "./routes/assistant.js";
 
 // ─── 1. Criar app Express e servidor HTTP ───────────────────────────
 // O Express é um framework para criar APIs HTTP.
@@ -37,6 +38,10 @@ import {
 
 const app = express();
 const server = createServer(app);
+
+// ─── Middleware ──────────────────────────────────────────────────────
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,87 +79,11 @@ async function sendInitialBetsInChunks(ws, bets) {
   return true;
 }
 
-// Rota básica para confirmar que o servidor está vivo
-app.get("/", (req, res) => {
-  res.json({
-    status: "online",
-    combinacoes: allEventSelections.length,
-    oddsGeradas: oddsMap.size,
-  });
-});
-
-app.get("/api/bets", async (req, res) => {
-  if (!isPostgresEnabled()) {
-    return res.status(503).json({
-      error: "PostgreSQL está desativado. Ativa POSTGRES_ENABLED=true para usar este endpoint.",
-    });
-  }
-
-  try {
-    const data = await getLatestBets({
-      limit: req.query.limit,
-      offset: req.query.offset,
-    });
-
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({
-      error: "Falha ao obter apostas da base de dados.",
-      detail: error.message,
-    });
-  }
-});
-
-app.get("/api/bets/grouped", async (req, res) => {
-  if (!isPostgresEnabled()) {
-    return res.status(503).json({
-      error: "PostgreSQL está desativado. Ativa POSTGRES_ENABLED=true para usar este endpoint.",
-    });
-  }
-
-  try {
-    const data = await getGroupedBets({
-      search: req.query.search,
-      sport: req.query.sport,
-      minStake: req.query.minStake,
-      timeRange: req.query.timeRange,
-      sortField: req.query.sortField,
-      sortOrder: req.query.sortOrder,
-      limit: req.query.limit,
-      offset: req.query.offset,
-    });
-
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({
-      error: "Falha ao obter grupos de apostas da base de dados.",
-      detail: error.message,
-    });
-  }
-});
-
-app.get("/api/bets/:id", async (req, res) => {
-  if (!isPostgresEnabled()) {
-    return res.status(503).json({
-      error: "PostgreSQL está desativado. Ativa POSTGRES_ENABLED=true para usar este endpoint.",
-    });
-  }
-
-  try {
-    const bet = await getBetById(req.params.id);
-
-    if (!bet) {
-      return res.status(404).json({ error: "Aposta não encontrada." });
-    }
-
-    return res.json({ bet });
-  } catch (error) {
-    return res.status(500).json({
-      error: "Falha ao obter aposta da base de dados.",
-      detail: error.message,
-    });
-  }
-});
+// ─── Routers modulares ──────────────────────────────────────────────
+app.use("/", rootRouter);
+app.use("/api/bets", betsRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/assistant", assistantRouter);
 
 // ─── 2. Criar WebSocket Server ──────────────────────────────────────
 // O WebSocket "agarra-se" ao servidor HTTP existente.

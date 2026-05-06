@@ -8,7 +8,9 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../tests && npm install",
-    "test:latency": "cd tests && npm run test:latency"
+    "test:latency": "cd tests && npm run test:latency",
+    "test:webllm": "cd tests && npm run test:webllm",
+    "test:webllm:headed": "cd tests && npm run test:webllm:headed"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.27",

@@ -61,6 +61,11 @@ function mergeGroupAccumulator(target, source) {
 
 function getWebSocketUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws"
+
+  if (window.location.hostname === "localhost") {
+    return `${protocol}://localhost:3001/ws`
+  }
+
   return `${protocol}://${window.location.host}/ws`
 }
 
@@ -157,10 +162,10 @@ export default function GroupedBetsTable() {
     const minMinuteKey = debouncedTimeRange === -1 ? getTodayStartMinuteKey() : nowMinuteKey - Number(debouncedTimeRange)
 
     const groupedMap = new Map()
-
+    console.log(minuteBucketsRef.current, {minMinuteKey})
     minuteBucketsRef.current.forEach((minuteGroups, minuteKey) => {
-      if (minuteKey < minMinuteKey) return
-
+      if (debouncedTimeRange!== -1 && minuteKey < minMinuteKey) return
+    
       minuteGroups.forEach((sourceGroup, key) => {
         if (debouncedSelectedSport !== "all" && sourceGroup.sport !== debouncedSelectedSport) return
         if (debouncedMinOdds !== "" && sourceGroup.odds < debouncedMinOdds) return
@@ -183,7 +188,7 @@ export default function GroupedBetsTable() {
     })
 
     const groups = Array.from(groupedMap.values()).filter((group) => group.betCount >= debouncedMinBets)
-
+    
     groups.sort((a, b) => {
       const left = getSortValue(a, sortField)
       const right = getSortValue(b, sortField)
