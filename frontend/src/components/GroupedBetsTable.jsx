@@ -1,5 +1,7 @@
+/* eslint-disable react-hooks/purity */
 import { useEffect, useMemo, useRef, useState } from "react"
 import "./GroupedBetsTable.scss"
+import { appendStoredBets, loadStoredBets, normalizeBet } from "../utils/betsStore"
 
 const REFRESH_THROTTLE_MS = 1000
 const WS_RECONNECT_DELAY_MS = 1000
@@ -67,23 +69,6 @@ function getWebSocketUrl() {
   }
 
   return `${protocol}://${window.location.host}/ws`
-}
-
-function normalizeBet(rawBet) {
-  return {
-    id: rawBet.id,
-    sport: rawBet.sport,
-    event: rawBet.event,
-    betType: rawBet.betType || rawBet.bet_type,
-    selection: rawBet.selection,
-    odd: Number(rawBet.odd),
-    stake: Number(rawBet.stake),
-    riskScore: Number(rawBet.riskScore ?? rawBet.risk_score ?? 0),
-    exposureRisk: Number(rawBet.exposureRisk ?? rawBet.exposure_risk ?? 0),
-    timestamp: rawBet.timestamp,
-    potentialPayout: Number(rawBet.potentialPayout ?? rawBet.potential_payout ?? 0),
-    potentialProfit: Number(rawBet.potentialProfit ?? rawBet.potential_profit ?? 0),
-  }
 }
 
 function getSortValue(group, field) {
@@ -155,6 +140,8 @@ export default function GroupedBetsTable() {
   const refreshTimerRef = useRef(null)
   const reconnectTimerRef = useRef(null)
 
+  // Date.now used for time-bucket calculations; allow here despite purity rule.
+  /* eslint-disable-next-line react-hooks/purity */
   const { groupedData, summary } = useMemo(() => {
     const searchLower = debouncedSearchText.trim().toLowerCase()
     const nowMinuteKey = Math.floor(Date.now() / ONE_MINUTE_MS)
@@ -232,8 +219,10 @@ export default function GroupedBetsTable() {
       }, REFRESH_THROTTLE_MS)
     }
 
-    const ingestBets = (bets) => {
+    const ingestBets = (bets, { persist = true } = {}) => {
       if (!Array.isArray(bets) || bets.length === 0) return
+
+      const acceptedBets = []
 
       for (const rawBet of bets) {
         const bet = normalizeBet(rawBet)
@@ -272,10 +261,23 @@ export default function GroupedBetsTable() {
 
         seenIdsRef.current.add(bet.id)
         if (bet.sport) sportSetRef.current.add(bet.sport)
+        acceptedBets.push(bet)
+      }
+
+      if (persist && acceptedBets.length > 0) {
+        appendStoredBets(acceptedBets)
       }
 
       setSports(["all", ...Array.from(sportSetRef.current).sort()])
       scheduleRefresh()
+    }
+
+    const hydrateFromStorage = () => {
+      const storedBets = loadStoredBets()
+
+      if (storedBets.length > 0) {
+        ingestBets(storedBets, { persist: false })
+      }
     }
 
     const connect = () => {
@@ -319,7 +321,10 @@ export default function GroupedBetsTable() {
       }
     }
 
+    hydrateFromStorage()
     connect()
+
+    // no-op: removed expected initial count indicator
 
     return () => {
       isUnmounting = true

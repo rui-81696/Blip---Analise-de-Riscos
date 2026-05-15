@@ -88,8 +88,11 @@
 .assistant-shortcuts {
   display: flex;
   gap: 0.4rem;
-  padding: 0.65rem 0.85rem;
+  padding: 0.5rem 0.7rem;
   border-bottom: 1px solid rgba(65, 98, 128, 0.28);
+  flex-wrap: wrap;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .assistant-shortcuts button {

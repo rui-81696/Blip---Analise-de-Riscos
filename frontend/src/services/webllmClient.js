@@ -40,7 +40,7 @@ function safeJsonParse(rawText) {
 function normalizeIntentPayload(payload) {
   const intent = String(payload?.intent || "summary");
 
-  const allowedIntents = new Set(["summary", "by-sport", "by-risk"]);
+  const allowedIntents = new Set(["summary", "by-sport", "by-risk", "recent", "top-stake", "critical"]);
   const safeIntent = allowedIntents.has(intent) ? intent : "summary";
 
   const params = {
@@ -58,13 +58,28 @@ function normalizeIntentPayload(payload) {
     }
   }
 
+  if (safeIntent === "critical") {
+    return { intent: "by-risk", params: { ...params, focus: "critical" } };
+  }
+
   return { intent: safeIntent, params };
 }
 
 export function fallbackIntent(question = "") {
   const normalized = question.toLowerCase();
 
+  if (normalized.includes("últim") || normalized.includes("ultim") || normalized.includes("recent")) {
+    return { intent: "recent", params: { period: DEFAULT_PERIOD, limit: 5 } };
+  }
+
+  if (normalized.includes("maior stake") || normalized.includes("highest stake") || normalized.includes("top stake")) {
+    return { intent: "top-stake", params: { period: DEFAULT_PERIOD, limit: 5 } };
+  }
+
   if (normalized.includes("risco") || normalized.includes("risk")) {
+    if (normalized.includes("critic")) {
+      return { intent: "by-risk", params: { period: DEFAULT_PERIOD, focus: "critical" } };
+    }
     return { intent: "by-risk", params: { period: DEFAULT_PERIOD } };
   }
 
@@ -72,6 +87,15 @@ export function fallbackIntent(question = "") {
     normalized.includes("desporto")
     || normalized.includes("esporte")
     || normalized.includes("sport")
+    || normalized.includes("football")
+    || normalized.includes("footabll")
+    || normalized.includes("futebol")
+    || normalized.includes("basket")
+    || normalized.includes("basketball")
+    || normalized.includes("basquet")
+    || normalized.includes("basquetebol")
+    || normalized.includes("tennis")
+    || normalized.includes("tenis")
     || normalized.includes("por desporto")
   ) {
     return { intent: "by-sport", params: { period: DEFAULT_PERIOD, limit: 10 } };
@@ -84,13 +108,119 @@ function buildSystemPrompt() {
   return [
     "You classify user questions about betting risk analytics.",
     "Return JSON only, no markdown.",
-    "Output schema: {\"intent\":\"summary|by-sport|by-risk\",\"params\":{\"period\":\"1h|24h|7d|today\",\"limit\":number?}}",
+    "Output schema: {\"intent\":\"summary|by-sport|by-risk|recent|top-stake|critical\",\"params\":{\"period\":\"1h|24h|7d|today\",\"limit\":number?,\"focus\":\"critical\"?}}",
     "Rules:",
     "- summary for general overview questions",
-    "- by-sport for questions grouped by sport",
+    "- by-sport for questions grouped by sport or specific sport names",
     "- by-risk for risk distribution questions",
+    "- recent for latest bets questions",
+    "- top-stake for largest bets questions",
+    "- critical for critical risk questions",
     "- use period=24h by default",
-    "- include limit only for by-sport; default limit=10",
+    "- When the user asks for analysis of the DATA provided in the prompt, DO NOT refuse: answer using the provided data and aggregates.",
+    "- Only refuse when the user explicitly requests instructions to commit illegal acts, or requests private personally-identifiable information not present in the dataset.",
+  ].join("\n");
+}
+
+function isRiskDomainQuestion(question = "") {
+  const normalized = String(question).toLowerCase();
+  const keywords = [
+    "aposta",
+    "apostas",
+    "stake",
+    "odd",
+    "risco",
+    "risk",
+    "exposicao",
+    "exposição",
+    "desporto",
+    "sport",
+    "evento",
+    "event",
+    "selection",
+    "selecao",
+    "seleção",
+    "football",
+    "futebol",
+    "basket",
+    "basketball",
+    "tennis",
+    "tenis",
+  ];
+
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function buildAnswerPrompt({ question, intent, params, analytics, conversation = [] }) {
+  const { summary, sports, topEvents, topSelections, riskBuckets, recentBets } = analytics;
+  const domainQuestion = isRiskDomainQuestion(question);
+
+  let data = `Total ${summary.totalBets} apostas, stake €${summary.totalStake.toFixed(2)}, exposição €${summary.totalExposure.toFixed(2)}.`;
+
+  if (sports && sports.length > 0) {
+    data += " Desportos: " + sports.map((s) => `${s.sport}=${s.betCount}`).join(", ");
+  }
+
+  if (topEvents?.length) {
+    data += " Eventos: " + topEvents
+      .slice(0, 4)
+      .map((item) => `${item.event}=${item.betCount}`)
+      .join(", ");
+  }
+
+  if (topSelections?.length) {
+    data += " Seleções: " + topSelections
+      .slice(0, 4)
+      .map((item) => `${item.selection}=${item.betCount}`)
+      .join(", ");
+  }
+
+  if (riskBuckets) {
+    data += ` Risco: baixo=${riskBuckets.low.count}, médio=${riskBuckets.medium.count}, alto=${riskBuckets.high.count}, crítico=${riskBuckets.critical.count}.`;
+  }
+
+  if (recentBets?.length) {
+    data += " Recentes: " + recentBets
+      .slice(0, 3)
+      .map((b) => `${b.sport}-${b.selection}-€${Number(b.stake).toFixed(2)}`)
+      .join(" | ");
+  }
+
+  if (riskBuckets?.critical?.count === 0) {
+    data += " Nota: risco crítico está em 0 porque nenhuma aposta atual ultrapassa o limiar de risco crítico.";
+  }
+
+  const historyText = Array.isArray(conversation) && conversation.length > 0
+    ? conversation
+      .slice(-4)
+      .map((item) => `${item.role === "assistant" ? "Assistant" : "User"}: ${item.text}`)
+      .join("\n")
+    : "Sem histórico.";
+
+  const baseInstructions = [
+    "És um assistant conversacional profissional.",
+    "Responde em Português europeu, de forma clara, natural e útil.",
+    "Se a pergunta for uma análise dos 'Dados' fornecidos, responde diretamente com os números/insights: NÃO recuses esse pedido.",
+    "Evita respostas vagas: se a pergunta for ambígua, explica o que assumiste em 1 frase.",
+    "Mantém respostas curtas (3 a 8 linhas), salvo pedido explícito do utilizador.",
+    `Histórico recente:\n${historyText}`,
+    `Pergunta: ${question}`,
+  ];
+
+  if (!domainQuestion) {
+    return [
+      ...baseInstructions,
+      "A pergunta está fora do domínio de apostas. Responde como chat geral, sem inventar factos.",
+    ].join("\n");
+  }
+
+  return [
+    ...baseInstructions,
+    "A pergunta está no domínio de apostas/risco.",
+    `Intenção: ${intent}.`,
+    `Parâmetros: ${JSON.stringify(params || {})}.`,
+    `Dados: ${data}`,
+    "Usa os dados acima quando o utilizador pedir números, totais ou comparações.",
   ].join("\n");
 }
 
@@ -136,7 +266,7 @@ export function subscribeWebLLMStatus(listener) {
   };
 }
 
-export async function resolveIntent(question) { //colocar aqui a receber as bets e fazer a resolucao dentro do frontend
+export async function resolveIntent(question) {
   const cleanQuestion = String(question || "").trim();
 
   if (!cleanQuestion) {
@@ -151,8 +281,8 @@ export async function resolveIntent(question) { //colocar aqui a receber as bets
         { role: "system", content: buildSystemPrompt() },
         { role: "user", content: cleanQuestion },
       ],
-      temperature: 0,
-      max_tokens: 120,
+      temperature: 0.2,
+      max_tokens: 150,
     });
 
     const modelText = response?.choices?.[0]?.message?.content || "";
@@ -165,5 +295,25 @@ export async function resolveIntent(question) { //colocar aqui a receber as bets
     return normalizeIntentPayload(parsed);
   } catch {
     return fallbackIntent(cleanQuestion);
+  }
+}
+
+export async function generateAssistantReply({ question, intent, params, analytics, conversation }) {
+  try {
+    const engine = await getEngine();
+
+    const response = await engine.chat.completions.create({
+      messages: [
+        { role: "system", content: buildAnswerPrompt({ question, intent, params, analytics, conversation }) },
+        { role: "user", content: question },
+      ],
+      temperature: 0.2,
+      max_tokens: 220,
+    });
+
+    const reply = response?.choices?.[0]?.message?.content?.trim() || "";
+    return reply.length > 0 ? reply : "";
+  } catch {
+    return "";
   }
 }

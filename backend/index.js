@@ -205,7 +205,7 @@ try {
       console.log(`Apostas iniciais enfileiradas para persistência (${initialBets.length.toLocaleString()}).`);
     } else {
       console.log(`Seed inicial ignorada: já existem ${currentCount.toLocaleString()} registos em bets.`);
-      initialBets = await getInitialSyncBets({ limit: INITIAL_COUNT });
+      initialBets = await getInitialSyncBets({ limit: currentCount });
       console.log(`Apostas carregadas da base de dados para initial sync WS (${initialBets.length.toLocaleString()}).`);
     }
 

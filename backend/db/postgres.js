@@ -264,7 +264,7 @@ export async function getInitialSyncBets({ limit = 400000 } = {}) {
     throw new Error("PostgreSQL não está inicializado.");
   }
 
-  const safeLimit = Math.min(Math.max(Number(limit) || 400000, 1), 400000);
+  const safeLimit = Math.max(Number(limit) || 400000, 1);
 
   const { rows } = await pool.query(`
     SELECT
