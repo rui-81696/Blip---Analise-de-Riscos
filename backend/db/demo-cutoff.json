@@ -1,7 +1,7 @@
 {
-  "cutoffIso": "2026-05-14T23:28:32.216Z",
-  "recordedAtIso": "2026-05-14T23:28:32.217Z",
+  "cutoffIso": "2026-05-20T12:36:58.247Z",
+  "recordedAtIso": "2026-05-20T12:36:58.248Z",
   "reason": "startup-live-cutoff",
-  "existingCountBeforeSeedDecision": 150,
+  "existingCountBeforeSeedDecision": 109,
   "seedExecuted": false
 }

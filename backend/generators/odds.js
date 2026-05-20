@@ -15,7 +15,7 @@ function generateBaseOdd() {
 
 function generateOddVariations(base) {
   const variations = [base];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 1; i++) {
     const delta = +(Math.random() * 0.3 - 0.15).toFixed(2);
     variations.push(Math.max(1.1, +(base + delta).toFixed(2)));
   }

@@ -502,3 +502,16 @@ export async function getMaxId() {
   const { rows } = await pool.query("SELECT MAX(id) AS max_id FROM bets");
   return parseInt(rows[0].max_id) || 0;
 }
+
+export async function truncateBets() {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS total FROM bets");
+  const total = rows[0]?.total ?? 0;
+
+  await pool.query("TRUNCATE TABLE bets;");
+
+  return total;
+}
