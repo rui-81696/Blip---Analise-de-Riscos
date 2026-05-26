@@ -96,22 +96,41 @@ app.use("/api/assistant", assistantRouter);
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 
-wss.on("connection", (ws) => {
+wss.on("connection", async (ws) => {
   console.log("Cliente WebSocket conectado!");
   ws.isInitialSyncDone = false;
 
-  sendInitialBetsInChunks(ws, initialBets)
-    .then((completed) => {
-      if (!completed) {
-        return;
-      }
+  try {
+    if (isPostgresEnabled()) {
+      const total = await getBetsCount();
 
-      ws.isInitialSyncDone = true;
-      console.log("Apostas iniciais enviadas.\n");
-    })
-    .catch((error) => {
-      console.error("Erro ao enviar sync inicial via WebSocket:", error.message);
-    });
+      // If DB has records, use them. If DB is empty but we have an in-memory seed,
+      // send the in-memory `initialBets` so clients see the seed immediately.
+      if (total === 0 && Array.isArray(initialBets) && initialBets.length > 0) {
+        const completed = await sendInitialBetsInChunks(ws, initialBets);
+        if (completed) {
+          ws.isInitialSyncDone = true;
+          console.log(`Apostas iniciais (in-memory seed) enviadas (${initialBets.length.toLocaleString()}).\n`);
+        }
+      } else {
+        const bets = await getInitialSyncBets({ limit: total });
+        const completed = await sendInitialBetsInChunks(ws, bets);
+
+        if (completed) {
+          ws.isInitialSyncDone = true;
+          console.log(`Apostas iniciais enviadas (${bets.length.toLocaleString()}).\n`);
+        }
+      }
+    } else {
+      const completed = await sendInitialBetsInChunks(ws, initialBets);
+      if (completed) {
+        ws.isInitialSyncDone = true;
+        console.log("Apostas iniciais enviadas.\n");
+      }
+    }
+  } catch (error) {
+    console.error("Erro ao enviar sync inicial via WebSocket:", error.message);
+  }
 
   ws.on("close", () => {
     console.log("Cliente WebSocket desconectado.");
