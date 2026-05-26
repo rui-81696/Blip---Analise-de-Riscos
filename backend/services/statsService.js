@@ -1,43 +1,122 @@
-import {
-  getGroupedBets,
-  getBetsCount,
-  getLatestBets,
-  isPostgresEnabled,
-} from "../db/postgres.js";
+import { getBetsInRange, isPostgresEnabled } from "../db/postgres.js";
+import { buildBetAnalytics } from "./betAnalytics.js";
 
-/**
- * Retorna um resumo de estatísticas gerais
- * @param {Object} options - Opções de filtro
- * @param {string} options.period - Período: 'today', '1h', '24h', '7d'
- * @returns {Promise<Object>} Resumo com totalBets, totalStake, totalExposure, profitLoss
- */
+const VALID_PERIODS = new Set(["1h", "24h", "7d", "today", "yesterday"]);
+
+function normalizePeriod(period = "24h") {
+  const safePeriod = String(period || "24h");
+  return VALID_PERIODS.has(safePeriod) ? safePeriod : "24h";
+}
+
+function getTimeBucketKey(timestamp, granularity) {
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  if (granularity === "minute") {
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  }
+
+  if (granularity === "hour") {
+    return `${year}-${month}-${day} ${hour}:00`;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function buildTimeSeries(bets, granularity) {
+  const buckets = new Map();
+
+  for (const bet of bets) {
+    const key = getTimeBucketKey(bet.timestamp, granularity);
+    if (!key) {
+      continue;
+    }
+
+    const current = buckets.get(key) || {
+      timestamp: key,
+      betCount: 0,
+      totalStake: 0,
+      totalExposure: 0,
+      totalOdd: 0,
+    };
+
+    current.betCount += 1;
+    current.totalStake += Number(bet.stake) || 0;
+    current.totalExposure += Number(bet.potentialProfit ?? bet.exposureRisk) || 0;
+    current.totalOdd += Number(bet.odd) || 0;
+    buckets.set(key, current);
+  }
+
+  return Array.from(buckets.values())
+    .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)))
+    .map((entry) => ({
+      ...entry,
+      averageOdd: entry.betCount > 0 ? entry.totalOdd / entry.betCount : 0,
+    }));
+}
+
+function sortArrayByField(items, sortField) {
+  const field = String(sortField || "totalExposure");
+
+  return [...items].sort((left, right) => {
+    if (field === "betCount") {
+      if (right.betCount !== left.betCount) return right.betCount - left.betCount;
+      if (right.totalExposure !== left.totalExposure) return right.totalExposure - left.totalExposure;
+    }
+
+    if (field === "totalStake") {
+      if (right.totalStake !== left.totalStake) return right.totalStake - left.totalStake;
+      if (right.betCount !== left.betCount) return right.betCount - left.betCount;
+    }
+
+    if (field === "lastBetAt") {
+      return String(right.lastBetAt || "").localeCompare(String(left.lastBetAt || ""));
+    }
+
+    if (right.totalExposure !== left.totalExposure) return right.totalExposure - left.totalExposure;
+    if (right.betCount !== left.betCount) return right.betCount - left.betCount;
+
+    return String(left.sport || left.betType || left.event || left.selection || "")
+      .localeCompare(String(right.sport || right.betType || right.event || right.selection || ""));
+  });
+}
+
+async function loadAnalytics({ period = "24h", limit = 200000, sport } = {}) {
+  const bets = await getBetsInRange({
+    period: normalizePeriod(period),
+    sport,
+    limit,
+  });
+
+  return buildBetAnalytics(bets);
+}
+
 export async function getSummary({ period = "24h" } = {}) {
   if (!isPostgresEnabled()) {
     throw new Error("PostgreSQL está desativado.");
   }
 
   try {
-    // Pega apostas agrupadas com um timeRange apropriado
-    const timeRangeMap = {
-      "1h": 60,
-      "24h": 1440,
-      "7d": 10080,
-      today: -1,
-    };
-
-    const timeRange = timeRangeMap[period] ?? 1440;
-
-    const data = await getGroupedBets({
-      timeRange,
-      limit: 10000,
-    });
+    const analytics = await loadAnalytics({ period });
+    const { summary } = analytics;
 
     return {
-      totalBets: data.totalBets,
-      totalStake: data.groups.reduce((sum, g) => sum + (g.total_stake || 0), 0),
-      totalExposure: data.totalExposure,
-      profitLoss: -data.totalExposure,
-      period,
+      totalBets: summary.totalBets,
+      totalStake: summary.totalStake,
+      totalExposure: summary.totalExposure,
+      profitLoss: -summary.totalExposure,
+      averageOdd: summary.averageOdd,
+      averageRiskScore: summary.averageRiskScore,
+      period: normalizePeriod(period),
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
@@ -45,58 +124,18 @@ export async function getSummary({ period = "24h" } = {}) {
   }
 }
 
-/**
- * Retorna estatísticas agrupadas por desporto
- * @param {Object} options - Opções de filtro
- * @param {string} options.period - Período: 'today', '1h', '24h', '7d'
- * @param {number} options.limit - Limite de resultados (max 1000)
- * @param {string} options.sort - Campo para ordenação
- * @returns {Promise<Object>} Array de grupos por desporto
- */
 export async function getBySport({ period = "24h", limit = 500, sort = "totalExposure" } = {}) {
   if (!isPostgresEnabled()) {
     throw new Error("PostgreSQL está desativado.");
   }
 
   try {
-    const timeRangeMap = {
-      "1h": 60,
-      "24h": 1440,
-      "7d": 10080,
-      today: -1,
-    };
-
-    const timeRange = timeRangeMap[period] ?? 1440;
+    const analytics = await loadAnalytics({ period, limit: 200000 });
     const safeLimit = Math.min(Math.max(Number(limit) || 500, 1), 1000);
 
-    const data = await getGroupedBets({
-      timeRange,
-      limit: safeLimit,
-      sortField: sort,
-      sortOrder: "desc",
-    });
-
-    // Agrupa por desporto
-    const sportMap = {};
-    data.groups.forEach((group) => {
-      if (!sportMap[group.sport]) {
-        sportMap[group.sport] = {
-          sport: group.sport,
-          betCount: 0,
-          totalStake: 0,
-          totalExposure: 0,
-          events: [],
-        };
-      }
-      sportMap[group.sport].betCount += group.bet_count;
-      sportMap[group.sport].totalStake += group.total_stake;
-      sportMap[group.sport].totalExposure += group.total_exposure;
-      sportMap[group.sport].events.push(group);
-    });
-
     return {
-      period,
-      sports: Object.values(sportMap),
+      period: normalizePeriod(period),
+      sports: sortArrayByField(analytics.sports, sort).slice(0, safeLimit),
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
@@ -104,91 +143,51 @@ export async function getBySport({ period = "24h", limit = 500, sort = "totalExp
   }
 }
 
-/**
- * Retorna séries temporais de estatísticas
- * @param {Object} options - Opções de filtro
- * @param {string} options.from - Data inicial (ISO)
- * @param {string} options.to - Data final (ISO)
- * @param {string} options.granularity - Granularidade: 'minute', 'hour', 'day'
- * @returns {Promise<Array>} Array com série temporal
- */
 export async function getByPeriod({ from, to, granularity = "hour" } = {}) {
   if (!isPostgresEnabled()) {
     throw new Error("PostgreSQL está desativado.");
   }
 
-  // Para esta fase, retorna um placeholder
-  // Em futuro, implementar query temporal no DB
-  return {
-    from,
-    to,
-    granularity,
-    data: [],
-    note: "Será implementado com agregação temporal no DB",
-  };
+  if (!from || !to) {
+    throw new Error("Parâmetros 'from' e 'to' são obrigatórios.");
+  }
+
+  try {
+    const bets = await getBetsInRange({ from, to, limit: 1000000 });
+    return {
+      from,
+      to,
+      granularity,
+      data: buildTimeSeries(bets, granularity),
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw new Error(`Erro ao obter stats por período: ${error.message}`);
+  }
 }
 
-/**
- * Retorna distribuição de risco
- * @param {Object} options - Opções de filtro
- * @param {string} options.period - Período: 'today', '1h', '24h', '7d'
- * @returns {Promise<Object>} Distribuição por bucket de risco
- */
 export async function getByRisk({ period = "24h" } = {}) {
   if (!isPostgresEnabled()) {
     throw new Error("PostgreSQL está desativado.");
   }
 
   try {
-    const timeRangeMap = {
-      "1h": 60,
-      "24h": 1440,
-      "7d": 10080,
-      today: -1,
-    };
-
-    const timeRange = timeRangeMap[period] ?? 1440;
-
-    const data = await getGroupedBets({
-      timeRange,
-      limit: 10000,
-    });
-
-    // Categoriza em buckets de risco (low, medium, high, critical)
-    const riskBuckets = {
-      low: { min: 0, max: 25, count: 0, exposure: 0 },
-      medium: { min: 25, max: 50, count: 0, exposure: 0 },
-      high: { min: 50, max: 75, count: 0, exposure: 0 },
-      critical: { min: 75, max: 100, count: 0, exposure: 0 },
-    };
-
-    data.groups.forEach((group) => {
-      // Nota: risk_score não está nesta estrutura, usaríamos exposureRisk como proxy
-      const exposure = group.total_exposure || 0;
-      const stake = group.total_stake || 0;
-      const riskRatio = stake > 0 ? (Math.abs(exposure) / stake) * 100 : 0;
-
-      if (riskRatio <= 25) {
-        riskBuckets.low.count += group.bet_count;
-        riskBuckets.low.exposure += exposure;
-      } else if (riskRatio <= 50) {
-        riskBuckets.medium.count += group.bet_count;
-        riskBuckets.medium.exposure += exposure;
-      } else if (riskRatio <= 75) {
-        riskBuckets.high.count += group.bet_count;
-        riskBuckets.high.exposure += exposure;
-      } else {
-        riskBuckets.critical.count += group.bet_count;
-        riskBuckets.critical.exposure += exposure;
-      }
-    });
-
+    const analytics = await loadAnalytics({ period });
     return {
-      period,
-      riskBuckets,
+      period: normalizePeriod(period),
+      riskBuckets: analytics.riskBuckets,
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
     throw new Error(`Erro ao obter stats por risco: ${error.message}`);
   }
+}
+
+export async function getDetailedAnalytics(options = {}) {
+  if (!isPostgresEnabled()) {
+    throw new Error("PostgreSQL está desativado.");
+  }
+
+  const analytics = await loadAnalytics(options);
+  return analytics;
 }

@@ -40,11 +40,28 @@ function safeJsonParse(rawText) {
 function normalizeIntentPayload(payload) {
   const intent = String(payload?.intent || "summary");
 
-  const allowedIntents = new Set(["summary", "by-sport", "by-risk", "recent", "top-stake", "critical"]);
+  const allowedIntents = new Set([
+    "summary",
+    "by-sport",
+    "by-risk",
+    "recent",
+    "top-stake",
+    "critical",
+    "selection-top",
+    "selection-odd-mode",
+    "selection-average-odd",
+    "event-selection-count",
+    "bettype-distribution",
+    "bettype-top",
+    "top-loss-bet",
+    "peak-hour",
+    "peak-hour-sport",
+    "legs",
+  ]);
   const safeIntent = allowedIntents.has(intent) ? intent : "summary";
 
   const params = {
-    period: ["1h", "24h", "7d", "today"].includes(payload?.params?.period)
+    period: ["1h", "24h", "7d", "today", "yesterday"].includes(payload?.params?.period)
       ? payload.params.period
       : DEFAULT_PERIOD,
   };
@@ -66,7 +83,39 @@ function normalizeIntentPayload(payload) {
 }
 
 export function fallbackIntent(question = "") {
-  const normalized = question.toLowerCase();
+  const normalized = String(question || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s+.-]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  if (normalized.includes("ontem") || normalized.includes("yesterday")) {
+    return { intent: "summary", params: { period: "yesterday" } };
+  }
+
+  if (normalized.includes("ultima semana") || normalized.includes("semana passada") || normalized.includes("last week")) {
+    return { intent: "summary", params: { period: "7d" } };
+  }
+
+  if (normalized.includes("hoje") || normalized.includes("today")) {
+    return { intent: "summary", params: { period: "today" } };
+  }
+
+  if (normalized.includes("selection") || normalized.includes("selecao")) {
+    if (normalized.includes("odd mais usada") || normalized.includes("odd mais frequente") || normalized.includes("odd mais repetida")) {
+      return { intent: "selection-odd-mode", params: { period: DEFAULT_PERIOD } };
+    }
+
+    if (normalized.includes("media de odd") || normalized.includes("odd media")) {
+      return { intent: "selection-average-odd", params: { period: DEFAULT_PERIOD } };
+    }
+
+    if (normalized.includes("mais apostas")) {
+      return { intent: "selection-top", params: { period: DEFAULT_PERIOD } };
+    }
+  }
 
   if (normalized.includes("últim") || normalized.includes("ultim") || normalized.includes("recent")) {
     return { intent: "recent", params: { period: DEFAULT_PERIOD, limit: 5 } };
@@ -81,6 +130,36 @@ export function fallbackIntent(question = "") {
       return { intent: "by-risk", params: { period: DEFAULT_PERIOD, focus: "critical" } };
     }
     return { intent: "by-risk", params: { period: DEFAULT_PERIOD } };
+  }
+
+  if (normalized.includes("evento") || normalized.includes("event")) {
+    if (normalized.includes("quantas selections") || normalized.includes("numero de selections")) {
+      return { intent: "event-selection-count", params: { period: DEFAULT_PERIOD } };
+    }
+  }
+
+  if (normalized.includes("bettype") || normalized.includes("bet type") || normalized.includes("tipo de aposta")) {
+    if (normalized.includes("mais comum")) {
+      return { intent: "bettype-top", params: { period: DEFAULT_PERIOD } };
+    }
+
+    return { intent: "bettype-distribution", params: { period: DEFAULT_PERIOD } };
+  }
+
+  if (normalized.includes("prejuizo") || normalized.includes("perda max") || normalized.includes("maior perda")) {
+    return { intent: "top-loss-bet", params: { period: DEFAULT_PERIOD } };
+  }
+
+  if (normalized.includes("legs")) {
+    return { intent: "legs", params: { period: DEFAULT_PERIOD } };
+  }
+
+  if (normalized.includes("altura do dia") || normalized.includes("hora do dia") || normalized.includes("pico de apostas")) {
+    if (normalized.includes("sport") || normalized.includes("desporto")) {
+      return { intent: "peak-hour-sport", params: { period: "7d" } };
+    }
+
+    return { intent: "peak-hour", params: { period: "yesterday" } };
   }
 
   if (
@@ -108,7 +187,7 @@ function buildSystemPrompt() {
   return [
     "You classify user questions about betting risk analytics.",
     "Return JSON only, no markdown.",
-    "Output schema: {\"intent\":\"summary|by-sport|by-risk|recent|top-stake|critical\",\"params\":{\"period\":\"1h|24h|7d|today\",\"limit\":number?,\"focus\":\"critical\"?}}",
+    "Output schema: {\"intent\":\"summary|by-sport|by-risk|recent|top-stake|critical|selection-top|selection-odd-mode|selection-average-odd|event-selection-count|bettype-distribution|bettype-top|top-loss-bet|peak-hour|peak-hour-sport|legs\",\"params\":{\"period\":\"1h|24h|7d|today|yesterday\",\"limit\":number?,\"focus\":\"critical\"?}}",
     "Rules:",
     "- summary for general overview questions",
     "- by-sport for questions grouped by sport or specific sport names",
@@ -116,7 +195,17 @@ function buildSystemPrompt() {
     "- recent for latest bets questions",
     "- top-stake for largest bets questions",
     "- critical for critical risk questions",
-    "- use period=24h by default",
+    "- selection-top for the selection with the most bets",
+    "- selection-odd-mode for the most used odd in a specific selection",
+    "- selection-average-odd for average odd in a specific selection",
+    "- event-selection-count for how many selections an event has",
+    "- bettype-distribution for distribution by betType",
+    "- bettype-top for the most common betType, optionally by sport",
+    "- top-loss-bet for the bet with the highest potential loss for the house",
+    "- peak-hour for the busiest hour of the day",
+    "- peak-hour-sport for the busiest hour of the day within a sport",
+    "- legs when the user asks about legs, but the UI should explain if the dataset does not store them",
+    "- use period=24h by default, but use yesterday when the user explicitly asks for ontem/yesterday",
     "- When the user asks for analysis of the DATA provided in the prompt, DO NOT refuse: answer using the provided data and aggregates.",
     "- Only refuse when the user explicitly requests instructions to commit illegal acts, or requests private personally-identifiable information not present in the dataset.",
   ].join("\n");

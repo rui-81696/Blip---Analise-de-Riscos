@@ -9,7 +9,7 @@ export async function handleGetSummary(req, res) {
     const { period = "24h" } = req.query;
 
     // Validar período
-    const validPeriods = ["1h", "24h", "7d", "today"];
+    const validPeriods = ["1h", "24h", "7d", "today", "yesterday"];
     if (!validPeriods.includes(period)) {
       return res.status(400).json({
         error: "Período inválido. Use: 1h, 24h, 7d ou today",
@@ -35,7 +35,7 @@ export async function handleGetBySport(req, res) {
     const { period = "24h", limit = 500, sort = "totalExposure" } = req.query;
 
     // Validar período
-    const validPeriods = ["1h", "24h", "7d", "today"];
+    const validPeriods = ["1h", "24h", "7d", "today", "yesterday"];
     if (!validPeriods.includes(period)) {
       return res.status(400).json({
         error: "Período inválido. Use: 1h, 24h, 7d ou today",
@@ -109,7 +109,7 @@ export async function handleGetByRisk(req, res) {
     const { period = "24h" } = req.query;
 
     // Validar período
-    const validPeriods = ["1h", "24h", "7d", "today"];
+    const validPeriods = ["1h", "24h", "7d", "today", "yesterday"];
     if (!validPeriods.includes(period)) {
       return res.status(400).json({
         error: "Período inválido. Use: 1h, 24h, 7d ou today",

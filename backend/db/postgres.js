@@ -250,6 +250,116 @@ export async function getLatestBets({ limit = 200, offset = 0 } = {}) {
   };
 }
 
+export async function getBetsInRange({
+  period = "24h",
+  from,
+  to,
+  sport,
+  betType,
+  event,
+  selection,
+  search,
+  limit = 200000,
+  offset = 0,
+} = {}) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const params = [];
+  const whereClauses = [];
+
+  if (from && to) {
+    params.push(from, to);
+    whereClauses.push(`timestamp >= $${params.length - 1}::timestamptz AND timestamp < $${params.length}::timestamptz`);
+  } else {
+    switch (String(period || "24h")) {
+      case "today":
+        whereClauses.push("timestamp >= date_trunc('day', now())");
+        break;
+      case "yesterday":
+        whereClauses.push("timestamp >= date_trunc('day', now()) - interval '1 day'");
+        whereClauses.push("timestamp < date_trunc('day', now())");
+        break;
+      case "1h":
+        whereClauses.push("timestamp >= now() - interval '1 hour'");
+        break;
+      case "24h":
+        whereClauses.push("timestamp >= now() - interval '24 hours'");
+        break;
+      case "7d":
+      case "lastWeek":
+        whereClauses.push("timestamp >= now() - interval '7 days'");
+        break;
+      default:
+        whereClauses.push("timestamp >= now() - interval '24 hours'");
+        break;
+    }
+  }
+
+  if (sport && sport !== "all") {
+    params.push(sport);
+    whereClauses.push(`sport = $${params.length}`);
+  }
+
+  if (betType && betType !== "all") {
+    params.push(betType);
+    whereClauses.push(`bet_type = $${params.length}`);
+  }
+
+  if (event && event !== "all") {
+    params.push(event);
+    whereClauses.push(`event = $${params.length}`);
+  }
+
+  if (selection && selection !== "all") {
+    params.push(selection);
+    whereClauses.push(`selection = $${params.length}`);
+  }
+
+  const safeSearch = String(search || "").trim();
+  if (safeSearch) {
+    params.push(`%${safeSearch}%`);
+    whereClauses.push(`(
+      sport ILIKE $${params.length}
+      OR event ILIKE $${params.length}
+      OR bet_type ILIKE $${params.length}
+      OR selection ILIKE $${params.length}
+      OR id::text ILIKE $${params.length}
+    )`);
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 200000, 1), 1000000);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+  const queryParams = [...params, safeLimit, safeOffset];
+  const { rows } = await pool.query(
+    `
+      SELECT
+        id,
+        sport,
+        event,
+        bet_type AS "betType",
+        selection,
+        odd::float8 AS odd,
+        stake::float8 AS stake,
+        timestamp,
+        potential_payout::float8 AS "potentialPayout",
+        potential_profit::float8 AS "potentialProfit",
+        risk_score AS "riskScore",
+        exposure_risk AS "exposureRisk"
+      FROM bets
+      ${whereSql}
+      ORDER BY timestamp DESC
+      LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}
+    `,
+    queryParams
+  );
+
+  return rows;
+}
+
 export async function getBetsCount() {
   if (!pool) {
     throw new Error("PostgreSQL não está inicializado.");
