@@ -1,34 +1,190 @@
+/**
+ * Cliente WebLLM (Llama-3.2) para o Risk Assistant.
+ *
+ * Arquitetura — function-calling em dois estágios:
+ *   1) ROUTER:    LLM lê a pergunta + catálogo de tools e devolve JSON
+ *                 { tool, params }. Não calcula nada.
+ *   2) COMPOSER:  Aplicamos a tool localmente sobre os dados do frontend,
+ *                 obtemos o resultado real, e pedimos ao LLM para formular
+ *                 a resposta em PT‑PT usando esses dados como ground truth.
+ *
+ * Vantagens:
+ *   - Zero pedidos ao backend (tudo client-side).
+ *   - O LLM nunca inventa números — só fala sobre os que a tool calcular.
+ *   - Para perguntas fora do domínio, há um modo "chit-chat" controlado.
+ *   - Fallbacks robustos: se o LLM falhar, usamos um router heurístico
+ *     muito leve só para o roteamento (a resposta usa sempre a tool real).
+ */
+
 import { CreateMLCEngine } from "@mlc-ai/web-llm";
+import { runTool, TOOL_CATALOG, describeDataset } from "../utils/betsAnalytics";
 
 const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-1B-Instruct-q4f32_1-MLC";
-const DEFAULT_PERIOD = "24h";
+
+// ─── Estado do motor (singleton) ───────────────────────────────────────────
 
 let enginePromise = null;
-let currentStatus = "idle";
+let currentStatus = "idle"; // idle | loading | ready | fallback
 let currentProgress = 0;
-const statusListeners = new Set();
-
-function notifyStatus() {
-  for (const listener of statusListeners) {
-    listener({ status: currentStatus, progress: currentProgress, model: MODEL_ID });
-  }
-}
+const listeners = new Set();
 
 function setStatus(status, progress = currentProgress) {
   currentStatus = status;
   currentProgress = progress;
-  notifyStatus();
+  for (const fn of listeners) {
+    fn({ status: currentStatus, progress: currentProgress, model: MODEL_ID });
+  }
 }
 
+export function subscribeWebLLMStatus(listener) {
+  listeners.add(listener);
+  listener({ status: currentStatus, progress: currentProgress, model: MODEL_ID });
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Cria/retorna o engine. Disparado quando o utilizador abre o chat,
+ * de modo que o load (~150–300 MB) não impacte o boot da app.
+ */
+export async function warmupWebLLM() {
+  if (enginePromise) return enginePromise.catch(() => null);
+
+  setStatus("loading", 0);
+
+  enginePromise = CreateMLCEngine(MODEL_ID, {
+    initProgressCallback: (report) => {
+      const pct = Math.max(0, Math.min(1, Number(report?.progress) || 0));
+      setStatus("loading", pct);
+    },
+  })
+    .then((engine) => {
+      setStatus("ready", 1);
+      return engine;
+    })
+    .catch((error) => {
+      setStatus("fallback", 0);
+      enginePromise = null;
+      console.error("[WebLLM] falha ao carregar engine:", error);
+      throw error;
+    });
+
+  return enginePromise.catch(() => null);
+}
+
+async function getEngine() {
+  if (!enginePromise) await warmupWebLLM();
+  return enginePromise;
+}
+
+// ─── Prompts ───────────────────────────────────────────────────────────────
+
+function buildToolsList() {
+  return Object.entries(TOOL_CATALOG)
+    .map(([name, spec]) => {
+      const params = Object.entries(spec.params)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ");
+      return `  • ${name} — ${spec.description} [params: ${params || "none"}]`;
+    })
+    .join("\n");
+}
+
+function buildRouterPrompt(question, datasetContext) {
+  const toolsList = buildToolsList();
+  const ctx = datasetContext
+    ? `Dataset disponível: ${datasetContext.totalBets} apostas. Sports: ${datasetContext.sports.slice(0, 8).join(", ")}. betTypes: ${datasetContext.betTypes.slice(0, 8).join(", ")}. Top selections: ${datasetContext.topSelections.slice(0, 5).map((s) => s.selection).join(", ")}. Top events: ${datasetContext.topEvents.slice(0, 5).map((e) => e.event).join(", ")}.`
+    : "";
+
+  return [
+    "You are a tool router for a sports-betting risk assistant.",
+    "Given a user question in Portuguese or English, pick exactly ONE tool from the catalog and the params it needs.",
+    "Output STRICT JSON only, no prose, no markdown, no explanation. Schema:",
+    '{"tool":"<tool-name>","params":{"period":"today|yesterday|1h|24h|7d|all","selection":"<text>?","event":"<text>?","sport":"<text>?","limit":<number>?}}',
+    "",
+    "Available tools:",
+    toolsList,
+    "",
+    "Routing rules:",
+    "- 'ontem' / 'yesterday' → period=yesterday. 'hoje' / 'today' → period=today. 'última semana' / 'last week' → period=7d. 'última hora' → period=1h. Default → period=24h.",
+    "- 'selection que teve mais apostas' → top-selection.",
+    "- 'odd mais usada na selection X' → selection-odd-mode, params.selection='X'.",
+    "- 'quantas selections tem o evento X' → event-selection-count, params.event='X'.",
+    "- 'média de odd para apostas na selection X' → selection-average-odd, params.selection='X'.",
+    "- 'bet que mais pode dar prejuízo à casa' / 'maior exposição' → top-loss-bet.",
+    "- 'distribuição por betType' → bettype-distribution.",
+    "- 'quantas legs tem a bet com mais legs' → max-legs.",
+    "- 'betType mais comum para apostas no sport X' → top-bettype-sport, params.sport='X'.",
+    "- 'altura do dia / hora com mais apostas ontem' → peak-hour, period=yesterday.",
+    "- 'altura do dia / hora com mais apostas no sport X' → peak-hour-sport, params.sport='X', period=7d.",
+    "- 'resumo geral' → summary.",
+    "- When extracting 'selection', 'event', or 'sport' from the question, copy the literal text from the question, do not translate. Examples: 'na selection Draw' → selection='Draw'; 'no evento Benfica vs Porto' → event='Benfica vs Porto'; 'no sport Tennis' → sport='Tennis'.",
+    "- If no tool fits cleanly, choose 'summary' with period=24h.",
+    "",
+    ctx,
+    "",
+    `Question: ${question}`,
+    "JSON:",
+  ].join("\n");
+}
+
+function buildComposerPrompt({ question, toolResult, history }) {
+  const historyBlock = Array.isArray(history) && history.length > 0
+    ? history
+        .slice(-4)
+        .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`)
+        .join("\n")
+    : "(sem histórico)";
+
+  const toolData = toolResult.data ? JSON.stringify(toolResult.data) : "null";
+
+  return [
+    "És um assistant profissional de análise de risco em apostas desportivas.",
+    "Respondes SEMPRE em Português europeu, de forma clara, natural e curta (1 a 4 frases).",
+    "",
+    "REGRAS CRÍTICAS:",
+    "1) Os números/valores/nomes vêm do bloco 'Dados da tool'. Não inventes nem alteres valores.",
+    "2) Se 'Dados da tool' indicar erro ou ausência de dados, comunica isso com clareza — não inventes alternativas.",
+    "3) Não menciones 'tool', 'JSON', 'WebLLM' ou detalhes internos. Fala como um analista humano.",
+    "4) Quando útil, acrescenta uma micro-recomendação (1 frase) só se for óbvia a partir dos dados — caso contrário, não acrescentes nada.",
+    "",
+    `Histórico recente:\n${historyBlock}`,
+    "",
+    `Pergunta do utilizador: ${question}`,
+    `Tool executada: ${toolResult.tool}`,
+    `Resposta determinística (fallback caso o LLM falhe): ${toolResult.answer}`,
+    `Dados da tool: ${toolData}`,
+    "",
+    "Resposta final:",
+  ].join("\n");
+}
+
+function buildChitChatPrompt(question, history) {
+  const historyBlock = Array.isArray(history) && history.length > 0
+    ? history.slice(-4).map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`).join("\n")
+    : "(sem histórico)";
+
+  return [
+    "És o Risk Assistant da Blip, integrado num dashboard de análise de risco para casas de apostas.",
+    "Respondes em Português europeu, de forma natural, simpática e profissional. Mantém respostas curtas (1–4 frases).",
+    "Se a pergunta não tiver relação com apostas/risco, podes conversar normalmente, mas se for adequado lembra o utilizador que também consegues analisar os dados de apostas que estão no dashboard.",
+    "Nunca inventes números sobre apostas — para isso o utilizador deve fazer uma pergunta concreta.",
+    "",
+    `Histórico recente:\n${historyBlock}`,
+    "",
+    `Pergunta: ${question}`,
+    "Resposta:",
+  ].join("\n");
+}
+
+// ─── Parsing helpers ───────────────────────────────────────────────────────
+
 function safeJsonParse(rawText) {
+  if (!rawText) return null;
   try {
     return JSON.parse(rawText);
   } catch {
     const match = rawText.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return null;
-    }
-
+    if (!match) return null;
     try {
       return JSON.parse(match[0]);
     } catch {
@@ -37,372 +193,319 @@ function safeJsonParse(rawText) {
   }
 }
 
-function normalizeIntentPayload(payload) {
-  const intent = String(payload?.intent || "summary");
+const VALID_PERIODS = new Set(["today", "yesterday", "1h", "24h", "7d", "all"]);
 
-  const allowedIntents = new Set([
-    "summary",
-    "by-sport",
-    "by-risk",
-    "recent",
-    "top-stake",
-    "critical",
-    "selection-top",
-    "selection-odd-mode",
-    "selection-average-odd",
-    "event-selection-count",
-    "bettype-distribution",
-    "bettype-top",
-    "top-loss-bet",
-    "peak-hour",
-    "peak-hour-sport",
-    "legs",
-  ]);
-  const safeIntent = allowedIntents.has(intent) ? intent : "summary";
+function normalizeRoute(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
 
-  const params = {
-    period: ["1h", "24h", "7d", "today", "yesterday"].includes(payload?.params?.period)
-      ? payload.params.period
-      : DEFAULT_PERIOD,
-  };
+  const toolName = String(parsed.tool || "").trim();
+  if (!TOOL_CATALOG[toolName]) return null;
 
-  if (safeIntent === "by-sport") {
-    const parsedLimit = Number(payload?.params?.limit);
-    if (Number.isFinite(parsedLimit)) {
-      params.limit = Math.min(Math.max(parsedLimit, 1), 1000);
-    } else {
-      params.limit = 10;
-    }
+  const rawParams = parsed.params && typeof parsed.params === "object" ? parsed.params : {};
+
+  const params = {};
+  if (rawParams.period && VALID_PERIODS.has(rawParams.period)) {
+    params.period = rawParams.period;
+  }
+  if (typeof rawParams.selection === "string" && rawParams.selection.trim()) {
+    params.selection = rawParams.selection.trim();
+  }
+  if (typeof rawParams.event === "string" && rawParams.event.trim()) {
+    params.event = rawParams.event.trim();
+  }
+  if (typeof rawParams.sport === "string" && rawParams.sport.trim()) {
+    params.sport = rawParams.sport.trim();
+  }
+  if (Number.isFinite(Number(rawParams.limit))) {
+    params.limit = Math.min(Math.max(Number(rawParams.limit), 1), 20);
   }
 
-  if (safeIntent === "critical") {
-    return { intent: "by-risk", params: { ...params, focus: "critical" } };
-  }
-
-  return { intent: safeIntent, params };
+  return { tool: toolName, params };
 }
 
-export function fallbackIntent(question = "") {
-  const normalized = String(question || "")
+// ─── Router heurístico (apenas fallback se LLM falhar no estágio 1) ────────
+
+function heuristicRoute(question = "") {
+  const q = String(question)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s+.-]/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
     .toLowerCase();
 
-  if (normalized.includes("ontem") || normalized.includes("yesterday")) {
-    return { intent: "summary", params: { period: "yesterday" } };
-  }
+  const period = q.includes("ontem") || q.includes("yesterday")
+    ? "yesterday"
+    : q.includes("hoje") || q.includes("today")
+      ? "today"
+      : q.includes("ultima semana") || q.includes("semana passada") || q.includes("last week") || q.includes("7 dias")
+        ? "7d"
+        : q.includes("ultima hora") || q.includes("last hour")
+          ? "1h"
+          : "24h";
 
-  if (normalized.includes("ultima semana") || normalized.includes("semana passada") || normalized.includes("last week")) {
-    return { intent: "summary", params: { period: "7d" } };
-  }
-
-  if (normalized.includes("hoje") || normalized.includes("today")) {
-    return { intent: "summary", params: { period: "today" } };
-  }
-
-  if (normalized.includes("selection") || normalized.includes("selecao")) {
-    if (normalized.includes("odd mais usada") || normalized.includes("odd mais frequente") || normalized.includes("odd mais repetida")) {
-      return { intent: "selection-odd-mode", params: { period: DEFAULT_PERIOD } };
-    }
-
-    if (normalized.includes("media de odd") || normalized.includes("odd media")) {
-      return { intent: "selection-average-odd", params: { period: DEFAULT_PERIOD } };
-    }
-
-    if (normalized.includes("mais apostas")) {
-      return { intent: "selection-top", params: { period: DEFAULT_PERIOD } };
-    }
-  }
-
-  if (normalized.includes("últim") || normalized.includes("ultim") || normalized.includes("recent")) {
-    return { intent: "recent", params: { period: DEFAULT_PERIOD, limit: 5 } };
-  }
-
-  if (normalized.includes("maior stake") || normalized.includes("highest stake") || normalized.includes("top stake")) {
-    return { intent: "top-stake", params: { period: DEFAULT_PERIOD, limit: 5 } };
-  }
-
-  if (normalized.includes("risco") || normalized.includes("risk")) {
-    if (normalized.includes("critic")) {
-      return { intent: "by-risk", params: { period: DEFAULT_PERIOD, focus: "critical" } };
-    }
-    return { intent: "by-risk", params: { period: DEFAULT_PERIOD } };
-  }
-
-  if (normalized.includes("evento") || normalized.includes("event")) {
-    if (normalized.includes("quantas selections") || normalized.includes("numero de selections")) {
-      return { intent: "event-selection-count", params: { period: DEFAULT_PERIOD } };
-    }
-  }
-
-  if (normalized.includes("bettype") || normalized.includes("bet type") || normalized.includes("tipo de aposta")) {
-    if (normalized.includes("mais comum")) {
-      return { intent: "bettype-top", params: { period: DEFAULT_PERIOD } };
-    }
-
-    return { intent: "bettype-distribution", params: { period: DEFAULT_PERIOD } };
-  }
-
-  if (normalized.includes("prejuizo") || normalized.includes("perda max") || normalized.includes("maior perda")) {
-    return { intent: "top-loss-bet", params: { period: DEFAULT_PERIOD } };
-  }
-
-  if (normalized.includes("legs")) {
-    return { intent: "legs", params: { period: DEFAULT_PERIOD } };
-  }
-
-  if (normalized.includes("altura do dia") || normalized.includes("hora do dia") || normalized.includes("pico de apostas")) {
-    if (normalized.includes("sport") || normalized.includes("desporto")) {
-      return { intent: "peak-hour-sport", params: { period: "7d" } };
-    }
-
-    return { intent: "peak-hour", params: { period: "yesterday" } };
-  }
-
-  if (
-    normalized.includes("desporto")
-    || normalized.includes("esporte")
-    || normalized.includes("sport")
-    || normalized.includes("football")
-    || normalized.includes("footabll")
-    || normalized.includes("futebol")
-    || normalized.includes("basket")
-    || normalized.includes("basketball")
-    || normalized.includes("basquet")
-    || normalized.includes("basquetebol")
-    || normalized.includes("tennis")
-    || normalized.includes("tenis")
-    || normalized.includes("por desporto")
-  ) {
-    return { intent: "by-sport", params: { period: DEFAULT_PERIOD, limit: 10 } };
-  }
-
-  return { intent: "summary", params: { period: DEFAULT_PERIOD } };
-}
-
-function buildSystemPrompt() {
-  return [
-    "You classify user questions about betting risk analytics.",
-    "Return JSON only, no markdown.",
-    "Output schema: {\"intent\":\"summary|by-sport|by-risk|recent|top-stake|critical|selection-top|selection-odd-mode|selection-average-odd|event-selection-count|bettype-distribution|bettype-top|top-loss-bet|peak-hour|peak-hour-sport|legs\",\"params\":{\"period\":\"1h|24h|7d|today|yesterday\",\"limit\":number?,\"focus\":\"critical\"?}}",
-    "Rules:",
-    "- summary for general overview questions",
-    "- by-sport for questions grouped by sport or specific sport names",
-    "- by-risk for risk distribution questions",
-    "- recent for latest bets questions",
-    "- top-stake for largest bets questions",
-    "- critical for critical risk questions",
-    "- selection-top for the selection with the most bets",
-    "- selection-odd-mode for the most used odd in a specific selection",
-    "- selection-average-odd for average odd in a specific selection",
-    "- event-selection-count for how many selections an event has",
-    "- bettype-distribution for distribution by betType",
-    "- bettype-top for the most common betType, optionally by sport",
-    "- top-loss-bet for the bet with the highest potential loss for the house",
-    "- peak-hour for the busiest hour of the day",
-    "- peak-hour-sport for the busiest hour of the day within a sport",
-    "- legs when the user asks about legs, but the UI should explain if the dataset does not store them",
-    "- use period=24h by default, but use yesterday when the user explicitly asks for ontem/yesterday",
-    "- When the user asks for analysis of the DATA provided in the prompt, DO NOT refuse: answer using the provided data and aggregates.",
-    "- Only refuse when the user explicitly requests instructions to commit illegal acts, or requests private personally-identifiable information not present in the dataset.",
-  ].join("\n");
-}
-
-function isRiskDomainQuestion(question = "") {
-  const normalized = String(question).toLowerCase();
-  const keywords = [
-    "aposta",
-    "apostas",
-    "stake",
-    "odd",
-    "risco",
-    "risk",
-    "exposicao",
-    "exposição",
-    "desporto",
-    "sport",
-    "evento",
-    "event",
-    "selection",
-    "selecao",
-    "seleção",
-    "football",
-    "futebol",
-    "basket",
-    "basketball",
-    "tennis",
-    "tenis",
-  ];
-
-  return keywords.some((keyword) => normalized.includes(keyword));
-}
-
-function buildAnswerPrompt({ question, intent, params, analytics, conversation = [] }) {
-  const { summary, sports, topEvents, topSelections, riskBuckets, recentBets } = analytics;
-  const domainQuestion = isRiskDomainQuestion(question);
-
-  let data = `Total ${summary.totalBets} apostas, stake €${summary.totalStake.toFixed(2)}, exposição €${summary.totalExposure.toFixed(2)}.`;
-
-  if (sports && sports.length > 0) {
-    data += " Desportos: " + sports.map((s) => `${s.sport}=${s.betCount}`).join(", ");
-  }
-
-  if (topEvents?.length) {
-    data += " Eventos: " + topEvents
-      .slice(0, 4)
-      .map((item) => `${item.event}=${item.betCount}`)
-      .join(", ");
-  }
-
-  if (topSelections?.length) {
-    data += " Seleções: " + topSelections
-      .slice(0, 4)
-      .map((item) => `${item.selection}=${item.betCount}`)
-      .join(", ");
-  }
-
-  if (riskBuckets) {
-    data += ` Risco: baixo=${riskBuckets.low.count}, médio=${riskBuckets.medium.count}, alto=${riskBuckets.high.count}, crítico=${riskBuckets.critical.count}.`;
-  }
-
-  if (recentBets?.length) {
-    data += " Recentes: " + recentBets
-      .slice(0, 3)
-      .map((b) => `${b.sport}-${b.selection}-€${Number(b.stake).toFixed(2)}`)
-      .join(" | ");
-  }
-
-  if (riskBuckets?.critical?.count === 0) {
-    data += " Nota: risco crítico está em 0 porque nenhuma aposta atual ultrapassa o limiar de risco crítico.";
-  }
-
-  const historyText = Array.isArray(conversation) && conversation.length > 0
-    ? conversation
-      .slice(-4)
-      .map((item) => `${item.role === "assistant" ? "Assistant" : "User"}: ${item.text}`)
-      .join("\n")
-    : "Sem histórico.";
-
-  const baseInstructions = [
-    "És um assistant conversacional profissional.",
-    "Responde em Português europeu, de forma clara, natural e útil.",
-    "Se a pergunta for uma análise dos 'Dados' fornecidos, responde diretamente com os números/insights: NÃO recuses esse pedido.",
-    "Evita respostas vagas: se a pergunta for ambígua, explica o que assumiste em 1 frase.",
-    "Mantém respostas curtas (3 a 8 linhas), salvo pedido explícito do utilizador.",
-    `Histórico recente:\n${historyText}`,
-    `Pergunta: ${question}`,
-  ];
-
-  if (!domainQuestion) {
-    return [
-      ...baseInstructions,
-      "A pergunta está fora do domínio de apostas. Responde como chat geral, sem inventar factos.",
-    ].join("\n");
-  }
-
-  return [
-    ...baseInstructions,
-    "A pergunta está no domínio de apostas/risco.",
-    `Intenção: ${intent}.`,
-    `Parâmetros: ${JSON.stringify(params || {})}.`,
-    `Dados: ${data}`,
-    "Usa os dados acima quando o utilizador pedir números, totais ou comparações.",
-  ].join("\n");
-}
-
-async function getEngine() {
-  if (!enginePromise) {
-    setStatus("loading", 0);
-
-    enginePromise = CreateMLCEngine(MODEL_ID, {
-      initProgressCallback: (progress) => {
-        const pct = Math.max(0, Math.min(1, Number(progress?.progress || 0)));
-        setStatus("loading", pct);
-      },
-    })
-      .then((engine) => {
-        setStatus("ready", 1);
-        return engine;
-      })
-      .catch((error) => {
-        setStatus("fallback", 0);
-        enginePromise = null;
-        throw error;
-      });
-  }
-
-  return enginePromise;
-}
-
-export async function warmupWebLLM() {
-  try {
-    await getEngine();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function subscribeWebLLMStatus(listener) {
-  statusListeners.add(listener);
-  listener({ status: currentStatus, progress: currentProgress, model: MODEL_ID });
-
-  return () => {
-    statusListeners.delete(listener);
+  // Tenta extrair "selection X", "evento Y", "sport Z" do texto bruto
+  // (mantém a caixa original para correspondência). As stop-words limitam
+  // a captura ao nome real (evita apanhar "X com base na última semana").
+  const STOPS = /(?:\s+(?:com|para|na|no|nas|nos|de|do|da|das|dos|com base|baseado|baseada|baseando|durante|nas|últim|ultim)|[?.!,])/i;
+  const extractAfter = (re) => {
+    const match = String(question).match(re);
+    if (!match) return null;
+    const raw = match[1].trim();
+    // Corta no primeiro stop-word/pontuação
+    const stopMatch = raw.match(STOPS);
+    const cleaned = stopMatch ? raw.slice(0, stopMatch.index) : raw;
+    return cleaned.trim() || null;
   };
-}
 
-export async function resolveIntent(question) {
-  const cleanQuestion = String(question || "").trim();
+  const selection = extractAfter(/(?:selection|seleção|selecao)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,60}?)(?=[?.!,]|$)/i);
+  const event = extractAfter(/(?:evento|event|jogo)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,80}?)(?=[?.!,]|$)/i);
+  const sport = extractAfter(/(?:sport|desporto)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,40}?)(?=[?.!,]|$)/i);
 
-  if (!cleanQuestion) {
-    return fallbackIntent("");
-  }
-
-  try {
-    const engine = await getEngine();
-
-    const response = await engine.chat.completions.create({
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        { role: "user", content: cleanQuestion },
-      ],
-      temperature: 0.2,
-      max_tokens: 150,
-    });
-
-    const modelText = response?.choices?.[0]?.message?.content || "";
-    const parsed = safeJsonParse(modelText);
-
-    if (!parsed) {
-      return fallbackIntent(cleanQuestion);
+  if (q.includes("selection") || q.includes("seleção") || q.includes("selecao")) {
+    if (q.includes("odd mais usada") || q.includes("odd mais frequente") || q.includes("moda")) {
+      return { tool: "selection-odd-mode", params: { period, ...(selection && { selection }) } };
     }
+    if (q.includes("media de odd") || q.includes("odd media") || q.includes("média de odd")) {
+      return { tool: "selection-average-odd", params: { period, ...(selection && { selection }) } };
+    }
+    if (q.includes("mais apostas") || q.includes("mais apostada")) {
+      return { tool: "top-selection", params: { period } };
+    }
+  }
 
-    return normalizeIntentPayload(parsed);
-  } catch {
-    return fallbackIntent(cleanQuestion);
+  if ((q.includes("evento") || q.includes("event")) && (q.includes("quantas selections") || q.includes("numero de selections"))) {
+    return { tool: "event-selection-count", params: { period: "all", ...(event && { event }) } };
+  }
+
+  if (q.includes("prejuizo") || q.includes("perda max") || q.includes("maior perda") || q.includes("maior exposicao") || q.includes("exposição") || q.includes("dar prejuizo")) {
+    return { tool: "top-loss-bet", params: { period } };
+  }
+
+  if (q.includes("distribuicao") && (q.includes("bettype") || q.includes("bet type") || q.includes("tipo"))) {
+    return { tool: "bettype-distribution", params: { period: q.includes("ontem") ? "yesterday" : "today" } };
+  }
+
+  if (q.includes("legs")) {
+    return { tool: "max-legs", params: { period: "all" } };
+  }
+
+  if ((q.includes("bettype") || q.includes("bet type") || q.includes("mercado") || q.includes("tipo de aposta")) && q.includes("mais comum")) {
+    if (sport) return { tool: "top-bettype-sport", params: { period, sport } };
+    return { tool: "bettype-top", params: { period } };
+  }
+
+  if (q.includes("altura do dia") || q.includes("hora do dia") || q.includes("pico de apostas") || q.includes("pico de bets")) {
+    if (sport || q.includes("sport") || q.includes("desporto")) {
+      return { tool: "peak-hour-sport", params: { period: "7d", ...(sport && { sport }) } };
+    }
+    return { tool: "peak-hour", params: { period: "yesterday" } };
+  }
+
+  if (q.includes("maior stake") || q.includes("mais stake")) {
+    return { tool: "top-stake", params: { period } };
+  }
+
+  if (q.includes("ultim") || q.includes("recent")) {
+    return { tool: "recent", params: { period, limit: 5 } };
+  }
+
+  if (q.includes("risco") || q.includes("risk")) {
+    return { tool: "by-risk", params: { period } };
+  }
+
+  if (q.includes("desporto") || q.includes("sport") || q.includes("por desporto")) {
+    return { tool: "by-sport", params: { period } };
+  }
+
+  return { tool: "summary", params: { period } };
+}
+
+// ─── Deteção de conversa fora do domínio ──────────────────────────────────
+
+const DOMAIN_KEYWORDS = [
+  "aposta", "apostas", "bet", "bets", "stake", "odd", "odds",
+  "risco", "risk", "prejuizo", "prejuízo", "perda", "exposicao", "exposição",
+  "desporto", "esporte", "sport", "evento", "event", "selection", "seleção", "selecao",
+  "bettype", "bet type", "mercado", "legs", "leg", "casa", "house",
+  "football", "futebol", "basket", "basketball", "tennis", "tenis", "tênis",
+  "resumo", "summary", "overview", "hora", "altura", "pico",
+];
+
+function isDomainQuestion(question = "") {
+  const q = String(question).toLowerCase();
+  return DOMAIN_KEYWORDS.some((k) => q.includes(k));
+}
+
+// ─── Estágio 1: routing ────────────────────────────────────────────────────
+
+async function llmRoute(question, datasetContext) {
+  const engine = await getEngine();
+  if (!engine) return null;
+
+  try {
+    const response = await engine.chat.completions.create({
+      messages: [
+        { role: "system", content: "You output ONLY valid JSON. No prose, no markdown." },
+        { role: "user", content: buildRouterPrompt(question, datasetContext) },
+      ],
+      temperature: 0.1,
+      max_tokens: 180,
+    });
+    const text = response?.choices?.[0]?.message?.content || "";
+    const parsed = safeJsonParse(text);
+    return normalizeRoute(parsed);
+  } catch (error) {
+    console.warn("[WebLLM] router falhou:", error);
+    return null;
   }
 }
 
-export async function generateAssistantReply({ question, intent, params, analytics, conversation }) {
-  try {
-    const engine = await getEngine();
+// ─── Estágio 2: composição da resposta ─────────────────────────────────────
 
+async function llmCompose({ question, toolResult, history }) {
+  const engine = await getEngine();
+  if (!engine) return null;
+
+  try {
     const response = await engine.chat.completions.create({
       messages: [
-        { role: "system", content: buildAnswerPrompt({ question, intent, params, analytics, conversation }) },
-        { role: "user", content: question },
+        {
+          role: "system",
+          content: "És um assistant profissional de análise de risco em apostas desportivas. Falas em Português europeu. Respondes de forma curta e clara, baseando-te apenas nos dados fornecidos.",
+        },
+        { role: "user", content: buildComposerPrompt({ question, toolResult, history }) },
       ],
-      temperature: 0.2,
+      temperature: 0.3,
       max_tokens: 220,
     });
 
-    const reply = response?.choices?.[0]?.message?.content?.trim() || "";
-    return reply.length > 0 ? reply : "";
-  } catch {
-    return "";
+    return (response?.choices?.[0]?.message?.content || "").trim();
+  } catch (error) {
+    console.warn("[WebLLM] composer falhou:", error);
+    return null;
   }
 }
+
+async function llmChitChat(question, history) {
+  const engine = await getEngine();
+  if (!engine) return null;
+
+  try {
+    const response = await engine.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "És o Risk Assistant da Blip. Falas em Português europeu de forma natural e curta.",
+        },
+        { role: "user", content: buildChitChatPrompt(question, history) },
+      ],
+      temperature: 0.5,
+      max_tokens: 180,
+    });
+
+    return (response?.choices?.[0]?.message?.content || "").trim();
+  } catch (error) {
+    console.warn("[WebLLM] chit-chat falhou:", error);
+    return null;
+  }
+}
+
+// ─── API pública ───────────────────────────────────────────────────────────
+
+/**
+ * Resposta para perguntas fora do domínio (small talk, perguntas gerais).
+ * Usado quando o utilizador escreve algo que não toca apostas/risco.
+ */
+async function handleGeneralQuestion(question, history) {
+  // Atalho determinístico para aritmética trivial (ex.: "2+2"), sempre certo
+  const mathMatch = String(question).trim().match(/^\s*(-?\d+(?:[.,]\d+)?)\s*([+\-*/x×])\s*(-?\d+(?:[.,]\d+)?)\s*\?*\s*$/);
+  if (mathMatch) {
+    const a = Number(mathMatch[1].replace(",", "."));
+    const op = mathMatch[2];
+    const b = Number(mathMatch[3].replace(",", "."));
+    let r = null;
+    if (op === "+") r = a + b;
+    if (op === "-") r = a - b;
+    if (op === "*" || op === "x" || op === "×") r = a * b;
+    if (op === "/") r = b === 0 ? null : a / b;
+    if (Number.isFinite(r)) return `${a} ${op} ${b} = ${r}.`;
+  }
+
+  if (currentStatus === "ready") {
+    const reply = await llmChitChat(question, history);
+    if (reply) return reply;
+  }
+
+  // Fallbacks simples
+  const q = question.toLowerCase();
+  if (q.includes("ola") || q.includes("olá") || q.includes("hello") || q.includes("boas") || q.includes("hey") || q.includes("hi")) {
+    return "Olá! Sou o Risk Assistant. Pergunta-me sobre as apostas no dashboard — selections, betTypes, picos de atividade, exposição da casa, etc.";
+  }
+  if (q.includes("quem es") || q.includes("quem és") || q.includes("o que fazes") || q.includes("what are you")) {
+    return "Sou um assistant client-side baseado em Llama (via WebLLM). Analiso os dados de apostas que estão no dashboard e ajudo a perceber risco, padrões e exposição.";
+  }
+  if (q.includes("obrigad") || q.includes("thanks") || q.includes("thank you")) {
+    return "Sempre às ordens.";
+  }
+
+  if (currentStatus === "loading") {
+    return `O modelo Llama ainda está a carregar (${Math.round((currentProgress || 0) * 100)}%). Posso responder a perguntas concretas sobre apostas; para conversa geral, espera só um pouco.`;
+  }
+
+  return "Posso ajudar com perguntas sobre as apostas no dashboard. Por exemplo: 'qual foi a selection com mais apostas ontem?' ou 'qual é a distribuição de bets por betType hoje?'";
+}
+
+/**
+ * Função principal: o componente chama isto com a pergunta + as apostas
+ * em memória + histórico recente. Devolve string final pronta a mostrar.
+ */
+export async function answerQuestion({ question, bets, history = [] }) {
+  const cleanQuestion = String(question || "").trim();
+  if (!cleanQuestion) return "";
+
+  // 1) Perguntas claramente fora de domínio → conversational
+  if (!isDomainQuestion(cleanQuestion)) {
+    const reply = await handleGeneralQuestion(cleanQuestion, history);
+    if (reply) return reply;
+  }
+
+  // 2) Routing — LLM se disponível, senão heurístico mínimo
+  const datasetContext = describeDataset(bets);
+  let route = null;
+  if (currentStatus === "ready") {
+    route = await llmRoute(cleanQuestion, datasetContext);
+  }
+  if (!route) {
+    route = heuristicRoute(cleanQuestion);
+  }
+
+  // 3) Executar a tool (sempre determinístico, sobre os dados do frontend)
+  const toolResult = runTool(route.tool, bets, route.params);
+
+  // 4) Compor resposta final
+  //    - Se o LLM estiver pronto, usamos para frasear naturalmente.
+  //    - Caso contrário, devolvemos a resposta determinística da tool
+  //      (que já é uma frase completa em PT-PT).
+  if (currentStatus === "ready" && toolResult.answer) {
+    const composed = await llmCompose({ question: cleanQuestion, toolResult, history });
+    if (composed && composed.length > 0) {
+      return composed;
+    }
+  }
+
+  return toolResult.answer || "Não consegui obter dados suficientes para responder. Tenta reformular a pergunta.";
+}
+
+/**
+ * Helper exposto: lista de exemplos de perguntas suportadas (para UI).
+ */
+export const SUPPORTED_QUESTIONS = [
+  "Qual foi a selection que teve mais apostas ontem?",
+  "Qual foi a odd mais usada nas apostas para a selection Draw?",
+  "Quantas selections tem o evento Benfica vs Porto?",
+  "Qual é a média de odd para apostas na selection Yes?",
+  "Qual foi a bet que mais pode dar prejuízo à casa?",
+  "Qual é a distribuição de bets por betType hoje?",
+  "Quantas legs tem a bet com mais legs?",
+  "Qual é o betType mais comum para apostas no sport Tennis?",
+  "Qual foi a altura do dia de ontem que tivemos um maior número de apostas?",
+  "Qual a altura do dia que temos mais apostas para o sport Football com base na última semana?",
+];

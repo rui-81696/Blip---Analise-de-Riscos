@@ -1,3 +1,5 @@
+// ─── Risk Assistant — UI flutuante ────────────────────────────────────────
+
 .assistant-floating {
   position: fixed;
   left: 1rem;
@@ -11,198 +13,327 @@
   pointer-events: auto;
 }
 
+// ─── Botão fechado ────────────────────────────────────────────────────────
+
 .assistant-toggle {
   border: 1px solid #2f4a64;
   background: linear-gradient(140deg, #0f2135 0%, #1d3b58 100%);
   color: #f2f7fb;
   border-radius: 999px;
-  padding: 0.65rem 0.95rem;
+  padding: 0.75rem 1.1rem;
   cursor: pointer;
   font-weight: 700;
-  font-size: 0.82rem;
-  box-shadow: 0 10px 22px rgba(5, 13, 26, 0.42);
+  font-size: 0.88rem;
+  box-shadow: 0 12px 28px rgba(5, 13, 26, 0.55);
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 32px rgba(5, 13, 26, 0.6);
+  }
+}
+
+.assistant-toggle-icon {
+  font-size: 1.1rem;
+  line-height: 1;
 }
 
 .assistant-toggle-hint {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   color: #b8cee0;
   font-weight: 500;
   border: 1px solid #34597c;
   border-radius: 999px;
-  padding: 0.14rem 0.42rem;
+  padding: 0.16rem 0.5rem;
 }
 
+// ─── Painel ───────────────────────────────────────────────────────────────
+
 .assistant-panel {
-  width: min(400px, calc(100vw - 1.5rem));
-  max-height: min(72vh, 620px);
+  // Compact (default): bem maior do que antes
+  width: min(520px, calc(100vw - 1.5rem));
+  height: min(80vh, 720px);
   display: flex;
   flex-direction: column;
   border: 1px solid #2a4057;
-  border-radius: 14px;
+  border-radius: 16px;
   background: linear-gradient(165deg, rgba(14, 22, 32, 0.98) 0%, rgba(16, 33, 51, 0.96) 100%);
   color: #e6edf3;
-  box-shadow: 0 16px 35px rgba(4, 9, 18, 0.55);
-  backdrop-filter: blur(4px);
+  box-shadow: 0 20px 45px rgba(4, 9, 18, 0.6);
+  backdrop-filter: blur(6px);
   overflow: hidden;
 }
 
-.assistant-panel.compact {
-  min-height: 320px;
+.assistant-panel.expanded {
+  width: min(720px, calc(100vw - 1.5rem));
+  height: min(88vh, 880px);
 }
 
-.assistant-panel.expanded {
-  width: min(540px, calc(100vw - 1.5rem));
-  max-height: min(82vh, 760px);
-}
+// ─── Header ───────────────────────────────────────────────────────────────
 
 .assistant-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.7rem 0.85rem;
-  border-bottom: 1px solid rgba(65, 98, 128, 0.38);
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid rgba(65, 98, 128, 0.4);
+  background: rgba(8, 17, 28, 0.4);
+}
+
+.assistant-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 
   strong {
-    font-size: 0.88rem;
+    font-size: 0.95rem;
     letter-spacing: 0.02em;
   }
 }
 
-.assistant-actions {
-  display: flex;
-  gap: 0.35rem;
+.assistant-llm-state {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #a9bfd1;
+  letter-spacing: 0.01em;
+
+  &.ready { color: #99d8b1; }
+  &.loading { color: #f2d089; }
+  &.fallback { color: #f1a8a8; }
 }
 
-.assistant-btn,
-.assistant-shortcuts button,
-.assistant-form button {
+.assistant-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.assistant-btn {
   border: 1px solid #3e5e7e;
   background: #16304a;
   color: #eff6fc;
   border-radius: 8px;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.73rem;
+  padding: 0.38rem 0.6rem;
+  font-size: 0.75rem;
   cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+
+  &:hover {
+    background: #1d3e5e;
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
 }
 
-.assistant-shortcuts {
-  display: flex;
-  gap: 0.55rem;
-  padding: 0.7rem 0.8rem;
-  border-bottom: 1px solid rgba(65, 98, 128, 0.28);
-  flex-wrap: wrap;
-  max-height: 160px;
-  overflow-y: auto;
+// ─── Barra de progresso de download do modelo ─────────────────────────────
+
+.assistant-progress {
+  height: 3px;
+  background: rgba(65, 98, 128, 0.25);
+  overflow: hidden;
 }
 
-.assistant-shortcuts button {
-  background: #214364;
+.assistant-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4a90e2 0%, #6cb0f0 100%);
+  transition: width 0.3s ease;
 }
 
-.assistant-llm-state {
-  margin: 0;
-  padding: 0.1rem 0.85rem 0.55rem;
-  font-size: 0.72rem;
-  color: #a9bfd1;
-}
-
-.assistant-llm-state.ready {
-  color: #99d8b1;
-}
-
-.assistant-llm-state.loading {
-  color: #f2d089;
-}
-
-.assistant-llm-state.fallback {
-  color: #f1a8a8;
-}
+// ─── Área de mensagens ────────────────────────────────────────────────────
 
 .assistant-messages {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: scroll;
+  overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.7rem 0.85rem;
-  padding-right: 0.45rem;
-  display: grid;
-  gap: 0.45rem;
+  padding: 0.9rem 1rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   scrollbar-gutter: stable;
-  scrollbar-width: auto;
-  scrollbar-color: #6e95b8 #102235;
-}
-
-.assistant-panel.expanded .assistant-messages {
-  max-height: none;
+  scrollbar-width: thin;
+  scrollbar-color: #6e95b8 transparent;
 }
 
 .assistant-messages::-webkit-scrollbar {
-  width: 12px;
+  width: 8px;
 }
 
 .assistant-messages::-webkit-scrollbar-track {
-  background: #102235;
-  border-radius: 999px;
+  background: transparent;
 }
 
 .assistant-messages::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #7ea4c5 0%, #4f789f 100%);
-  border: 3px solid #102235;
+  background: linear-gradient(180deg, #4f789f 0%, #34597c 100%);
   border-radius: 999px;
 }
 
 .assistant-messages::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #92b7d7 0%, #648cb1 100%);
+  background: linear-gradient(180deg, #648cb1 0%, #45719b 100%);
 }
 
-.assistant-empty {
-  margin: 0;
-  color: #a9bfd1;
-  font-size: 0.78rem;
+// ─── Mensagem de boas-vindas + sugestões ─────────────────────────────────
+
+.assistant-welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.3rem 0;
 }
+
+.assistant-welcome-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.assistant-welcome-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #a9bfd1;
+}
+
+.assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.assistant-suggestion {
+  border: 1px solid rgba(74, 144, 226, 0.45);
+  background: rgba(74, 144, 226, 0.12);
+  color: #cfe2f7;
+  border-radius: 999px;
+  padding: 0.34rem 0.7rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(74, 144, 226, 0.22);
+    border-color: rgba(108, 176, 240, 0.6);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+// ─── Mensagens ────────────────────────────────────────────────────────────
 
 .assistant-message {
   margin: 0;
-  padding: 0.5rem 0.62rem;
-  border-radius: 9px;
-  font-size: 0.78rem;
-  line-height: 1.35;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-width: 92%;
 }
 
 .assistant-message.user {
-  background: rgba(63, 113, 158, 0.3);
-  border: 1px solid rgba(89, 147, 197, 0.45);
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.32) 0%, rgba(63, 113, 158, 0.28) 100%);
+  border: 1px solid rgba(89, 147, 197, 0.5);
+  color: #f2f7fb;
 }
 
 .assistant-message.assistant {
-  background: rgba(26, 49, 70, 0.55);
-  border: 1px solid rgba(74, 108, 138, 0.38);
+  align-self: flex-start;
+  background: rgba(26, 49, 70, 0.6);
+  border: 1px solid rgba(74, 108, 138, 0.4);
+  color: #e6edf3;
 }
+
+// Indicador "a pensar" — três pontos a pulsar
+.assistant-message.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.7rem 0.85rem;
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8ab4dc;
+    animation: assistantTypingDot 1.2s infinite ease-in-out;
+
+    &:nth-child(2) { animation-delay: 0.15s; }
+    &:nth-child(3) { animation-delay: 0.3s; }
+  }
+}
+
+@keyframes assistantTypingDot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+
+// ─── Formulário ───────────────────────────────────────────────────────────
 
 .assistant-form {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.68rem 0.85rem 0.82rem;
-  border-top: 1px solid rgba(65, 98, 128, 0.28);
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0.9rem;
+  border-top: 1px solid rgba(65, 98, 128, 0.3);
+  background: rgba(8, 17, 28, 0.35);
 
   input {
-    width: 100%;
+    flex: 1;
     border: 1px solid #3a5a79;
-    border-radius: 8px;
+    border-radius: 9px;
     background: #0f1f31;
     color: #eef5fb;
-    font-size: 0.8rem;
-    padding: 0.46rem 0.58rem;
+    font-size: 0.85rem;
+    padding: 0.55rem 0.7rem;
+    outline: none;
+    transition: border-color 0.15s ease;
+
+    &:focus {
+      border-color: #4a90e2;
+    }
+
+    &::placeholder {
+      color: #6b88a8;
+    }
   }
 
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
+  button {
+    border: 1px solid #4a90e2;
+    background: linear-gradient(135deg, #2a6cc4 0%, #4a90e2 100%);
+    color: #fff;
+    border-radius: 9px;
+    padding: 0.5rem 1rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 70px;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+
+    &:hover:not(:disabled) {
+      opacity: 0.95;
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
   }
 }
+
+// ─── Responsive ───────────────────────────────────────────────────────────
 
 @media (max-width: 760px) {
   .assistant-floating {
@@ -214,6 +345,6 @@
   .assistant-panel,
   .assistant-panel.expanded {
     width: 100%;
-    max-height: calc(100vh - 1.2rem);
+    height: calc(100vh - 1.2rem);
   }
 }
