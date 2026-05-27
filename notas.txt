@@ -1,0 +1,5 @@
+backend modular, endpoints stats, endpoint assistant, WS único para live, polling removido, geração reduzida, teste e2e WebLLM infra.
+
+Corrigir o erro do sendinitialbets, pois sempre que damos refresh ao site ele apenas mostra as apostas geradas inicialmente e as seguintes a serem geradas, nao mostra as outras geradas anteriormente que nao foram iniciais.
+
+Colocar o webllm a tratar de tudo no frontend ja que ja temos os dados todos acumulados na tabela nao precisamos de realizar os pedidos ao frontend.

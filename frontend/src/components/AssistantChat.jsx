@@ -24,6 +24,7 @@ export default function AssistantChat() {
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const clientApiRef = useRef(null);
 
   const visibleMessages = useMemo(() => messages, [messages]);
 
@@ -41,18 +42,30 @@ export default function AssistantChat() {
 
   // ── Lazy load do WebLLM quando o chat abre pela primeira vez ───────────
   useEffect(() => {
-    if (!isOpen || clientApi) return;
+    if (!isOpen) return;
 
     setLlmState({ status: "loading", progress: 0, model: "a carregar…" });
 
     let unsubscribe = null;
 
+    const attach = (mod) => {
+      unsubscribe = mod.subscribeWebLLMStatus((payload) => setLlmState(payload));
+      // Dispara o download/init do modelo em background — não bloqueia a UI.
+      mod.warmupWebLLM();
+    };
+
+    if (clientApiRef.current) {
+      attach(clientApiRef.current);
+      return () => {
+        if (typeof unsubscribe === "function") unsubscribe();
+      };
+    }
+
     import("../services/webllmClient")
       .then((mod) => {
+        clientApiRef.current = mod;
         setClientApi(mod);
-        unsubscribe = mod.subscribeWebLLMStatus((payload) => setLlmState(payload));
-        // Dispara o download/init do modelo em background — não bloqueia a UI.
-        mod.warmupWebLLM();
+        attach(mod);
       })
       .catch((error) => {
         console.error("[AssistantChat] falha a carregar o módulo WebLLM:", error);
@@ -62,7 +75,7 @@ export default function AssistantChat() {
     return () => {
       if (typeof unsubscribe === "function") unsubscribe();
     };
-  }, [isOpen, clientApi]);
+  }, [isOpen]);
 
   // ── Auto-scroll ────────────────────────────────────────────────────────
   useEffect(() => {
