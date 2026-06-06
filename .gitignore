@@ -40,3 +40,5 @@ backend/data/db.json
 
 # Misc
 *.pdf
+
+.claude/
