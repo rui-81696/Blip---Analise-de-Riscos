@@ -53,7 +53,6 @@
 // ─── Painel ───────────────────────────────────────────────────────────────
 
 .assistant-panel {
-  // Compact (default): bem maior do que antes
   width: min(520px, calc(100vw - 1.5rem));
   height: min(80vh, 720px);
   display: flex;
@@ -120,12 +119,31 @@
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: #1d3e5e;
   }
 
-  &:active {
+  &:active:not(:disabled) {
     transform: scale(0.97);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+}
+
+// Variante: botão "Análise de Risco" — mesmo tamanho e padding dos restantes,
+// apenas muda a paleta para um amarelo discreto que sinaliza ação de alerta.
+// NÃO altera espaçamentos: herda padding/font-size de .assistant-btn.
+.assistant-btn-risk {
+  border-color: #b58a2e;
+  background: #3a2e10;
+  color: #f4d488;
+  font-weight: 700;
+
+  &:hover:not(:disabled) {
+    background: #4a3a14;
   }
 }
 
@@ -253,7 +271,19 @@
   color: #e6edf3;
 }
 
-// Indicador "a pensar" — três pontos a pulsar
+// Caret de streaming — pisca enquanto chegam tokens
+.streaming-caret {
+  display: inline-block;
+  margin-left: 2px;
+  opacity: 0.85;
+  animation: assistantCaretBlink 0.9s steps(2, start) infinite;
+}
+
+@keyframes assistantCaretBlink {
+  to { visibility: hidden; }
+}
+
+// Indicador "a pensar"
 .assistant-message.typing {
   display: inline-flex;
   align-items: center;

@@ -7,11 +7,12 @@ import { loadStoredBets } from "../utils/betsStore";
  *
  * Comportamento:
  *  - O modelo Llama é carregado APENAS quando o utilizador abre o chat
- *    pela primeira vez (lazy import + warmup), para não pesar no boot.
- *  - Toda a análise é feita client-side a partir das apostas guardadas
- *    no betsStore (localStorage + ingest WebSocket).
- *  - Cada pergunta passa por: LLM-router → tool determinística → LLM-composer.
- *  - Atalho de teclado: Ctrl+M / Cmd+M abre e fecha o painel.
+ *    pela primeira vez (lazy import + warmup).
+ *  - Toda a análise é feita client-side a partir do betsStore.
+ *  - Pipeline normal: LLM-router → tool determinística → LLM-composer (com streaming).
+ *  - Pipeline dedicado: botão ⚠ executa `runRiskAnalysis` (detect-anomalies + briefing).
+ *  - Multi-turn: histórico recente é passado quando a pergunta tem referências.
+ *  - Atalho: Ctrl+M / Cmd+M abre/fecha.
  */
 export default function AssistantChat() {
   const [isOpen, setIsOpen] = useState(false);
@@ -40,7 +41,7 @@ export default function AssistantChat() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // ── Lazy load do WebLLM quando o chat abre pela primeira vez ───────────
+  // ── Lazy load do WebLLM quando o chat abre ────────────────────────────
   useEffect(() => {
     if (!isOpen) return;
 
@@ -50,7 +51,6 @@ export default function AssistantChat() {
 
     const attach = (mod) => {
       unsubscribe = mod.subscribeWebLLMStatus((payload) => setLlmState(payload));
-      // Dispara o download/init do modelo em background — não bloqueia a UI.
       mod.warmupWebLLM();
     };
 
@@ -82,7 +82,7 @@ export default function AssistantChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isOpen, isExpanded]);
 
-  // ── Foco no input quando abre ──────────────────────────────────────────
+  // ── Foco no input ──────────────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
       const t = setTimeout(() => inputRef.current?.focus(), 80);
@@ -90,7 +90,40 @@ export default function AssistantChat() {
     }
   }, [isOpen]);
 
-  // ── Envio de pergunta ──────────────────────────────────────────────────
+  // ── Helpers de UI ──────────────────────────────────────────────────────
+  // Atualiza a última mensagem do assistant (in-place), criando-a se preciso.
+  // Usado pelo callback onToken para fazer streaming visual.
+  function appendToLastAssistant(delta) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === "assistant" && last.streaming) {
+        const updated = { ...last, text: (last.text || "") + delta };
+        return [...prev.slice(0, -1), updated];
+      }
+      // Cria nova bolha de assistant em modo streaming
+      return [
+        ...prev,
+        { id: `${Date.now()}-a`, role: "assistant", text: delta, streaming: true },
+      ];
+    });
+  }
+
+  function finalizeStreaming(finalText) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === "assistant" && last.streaming) {
+        const updated = { ...last, text: finalText || last.text, streaming: false };
+        return [...prev.slice(0, -1), updated];
+      }
+      // Caso raro: nenhum token chegou (LLM falhou silenciosamente)
+      if (finalText) {
+        return [...prev, { id: `${Date.now()}-a`, role: "assistant", text: finalText }];
+      }
+      return prev;
+    });
+  }
+
+  // ── Envio de pergunta (com streaming) ─────────────────────────────────
   async function sendQuestion(question) {
     const clean = String(question || "").trim();
     if (!clean || isThinking) return;
@@ -105,29 +138,71 @@ export default function AssistantChat() {
     });
 
     try {
-      // O dataset vem 100% do frontend (betsStore alimentado pelo WS).
       const bets = loadStoredBets();
       const history = nextMessages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, text: m.text }));
 
-      let reply = "";
+      let finalText = "";
       if (clientApi && typeof clientApi.answerQuestion === "function") {
-        reply = await clientApi.answerQuestion({ question: clean, bets, history });
+        finalText = await clientApi.answerQuestion({
+          question: clean,
+          bets,
+          history,
+          onToken: appendToLastAssistant,
+        });
       } else {
-        // Módulo ainda nem foi importado (caso muito raro: clique rápido)
-        reply = "O assistente ainda está a inicializar. Tenta de novo em alguns segundos.";
+        finalText = "O assistente ainda está a inicializar. Tenta de novo em alguns segundos.";
+        appendToLastAssistant(finalText);
       }
 
-      setMessages((prev) => [
-        ...prev,
-        { id: `${Date.now()}-a`, role: "assistant", text: reply || "Sem resposta." },
-      ]);
+      finalizeStreaming(finalText);
     } catch (error) {
       console.error("[AssistantChat] erro a processar pergunta:", error);
+      finalizeStreaming("");
       setMessages((prev) => [
         ...prev,
         { id: `${Date.now()}-e`, role: "assistant", text: `Ocorreu um erro: ${error.message}` },
+      ]);
+    } finally {
+      setIsThinking(false);
+    }
+  }
+
+  // ── Análise de risco (pipeline dedicado) ──────────────────────────────
+  async function runRiskAnalysis() {
+    if (isThinking) return;
+    setIsThinking(true);
+
+    // Mensagem de utilizador implícita para deixar o contexto claro na conversa
+    const userMessage = { id: `${Date.now()}-u`, role: "user", text: "⚠ Análise de risco" };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const bets = loadStoredBets();
+      const history = [...messages, userMessage]
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, text: m.text }));
+
+      let finalText = "";
+      if (clientApi && typeof clientApi.runRiskAnalysis === "function") {
+        finalText = await clientApi.runRiskAnalysis({
+          bets,
+          history,
+          onToken: appendToLastAssistant,
+        });
+      } else {
+        finalText = "O assistente ainda está a inicializar. Tenta de novo em alguns segundos.";
+        appendToLastAssistant(finalText);
+      }
+
+      finalizeStreaming(finalText);
+    } catch (error) {
+      console.error("[AssistantChat] erro na análise de risco:", error);
+      finalizeStreaming("");
+      setMessages((prev) => [
+        ...prev,
+        { id: `${Date.now()}-e`, role: "assistant", text: `Falha na análise de risco: ${error.message}` },
       ]);
     } finally {
       setIsThinking(false);
@@ -151,7 +226,6 @@ export default function AssistantChat() {
     setMessages([]);
   }
 
-  // ── Texto de estado do modelo ──────────────────────────────────────────
   function llmStatusText() {
     if (llmState.status === "ready") return `🟢 Llama pronto`;
     if (llmState.status === "loading") return `🟡 Llama a carregar — ${Math.round((llmState.progress || 0) * 100)}%`;
@@ -166,6 +240,7 @@ export default function AssistantChat() {
     { label: "Pico de apostas ontem", text: "Qual foi a altura do dia de ontem que tivemos um maior número de apostas?" },
     { label: "Pico — Tennis (7d)", text: "Qual a altura do dia que temos mais apostas para o sport Tennis com base na última semana?" },
     { label: "betType mais comum — Football", text: "Qual é o betType mais comum para apostas no sport Football?" },
+    { label: "Hoje vs ontem", text: "Compara o volume e exposição de hoje vs ontem." },
     { label: "Resumo geral 24h", text: "Dá-me um resumo geral das últimas 24 horas." },
   ];
 
@@ -198,6 +273,17 @@ export default function AssistantChat() {
             </div>
 
             <div className="assistant-actions">
+              {/* Botão Análise de Risco — mesma fila, mesmo estilo, antes dos outros */}
+              <button
+                type="button"
+                className="assistant-btn assistant-btn-risk"
+                onClick={runRiskAnalysis}
+                disabled={isThinking}
+                aria-label="Análise de risco"
+                title="Análise de risco — detetar anomalias"
+              >
+                ⚠
+              </button>
               <button
                 type="button"
                 className="assistant-btn"
@@ -263,12 +349,16 @@ export default function AssistantChat() {
             )}
 
             {visibleMessages.map((message) => (
-              <p key={message.id} className={`assistant-message ${message.role}`}>
+              <p
+                key={message.id}
+                className={`assistant-message ${message.role}${message.streaming ? " streaming" : ""}`}
+              >
                 {message.text}
+                {message.streaming && <span className="streaming-caret" aria-hidden="true">▍</span>}
               </p>
             ))}
 
-            {isThinking && (
+            {isThinking && !visibleMessages.some((m) => m.streaming) && (
               <p className="assistant-message assistant typing" aria-label="A pensar">
                 <span className="dot" />
                 <span className="dot" />

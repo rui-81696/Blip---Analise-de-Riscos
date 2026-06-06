@@ -1,19 +1,17 @@
 /**
  * Cliente WebLLM (Llama-3.2) para o Risk Assistant.
  *
- * Arquitetura — function-calling em dois estágios:
- *   1) ROUTER:    LLM lê a pergunta + catálogo de tools e devolve JSON
- *                 { tool, params }. Não calcula nada.
- *   2) COMPOSER:  Aplicamos a tool localmente sobre os dados do frontend,
- *                 obtemos o resultado real, e pedimos ao LLM para formular
- *                 a resposta em PT‑PT usando esses dados como ground truth.
+ * Arquitetura — function-calling em dois estágios + streaming:
+ *   1) ROUTER:    LLM lê a pergunta + histórico recente (se ambíguo) +
+ *                 catálogo de tools e devolve JSON {tool, params}.
+ *   2) COMPOSER:  Aplicamos a tool localmente, obtemos o resultado real,
+ *                 e pedimos ao LLM para frasear naturalmente — com STREAMING
+ *                 token a token via callback onToken.
  *
- * Vantagens:
- *   - Zero pedidos ao backend (tudo client-side).
- *   - O LLM nunca inventa números — só fala sobre os que a tool calcular.
- *   - Para perguntas fora do domínio, há um modo "chit-chat" controlado.
- *   - Fallbacks robustos: se o LLM falhar, usamos um router heurístico
- *     muito leve só para o roteamento (a resposta usa sempre a tool real).
+ * Modos especiais:
+ *   - answerQuestion()    → pipeline normal (router → tool → composer).
+ *   - runRiskAnalysis()   → pipeline dedicado: tool detect-anomalies +
+ *                           composer com prompt de "briefing operacional".
  */
 
 import { CreateMLCEngine } from "@mlc-ai/web-llm";
@@ -42,10 +40,6 @@ export function subscribeWebLLMStatus(listener) {
   return () => listeners.delete(listener);
 }
 
-/**
- * Cria/retorna o engine. Disparado quando o utilizador abre o chat,
- * de modo que o load (~150–300 MB) não impacte o boot da app.
- */
 export async function warmupWebLLM() {
   if (enginePromise) return enginePromise.catch(() => null);
 
@@ -76,6 +70,49 @@ async function getEngine() {
   return enginePromise;
 }
 
+// ─── Multi-turn: deteta se a pergunta atual precisa de contexto anterior ──
+
+const AMBIGUITY_MARKERS = [
+  // PT
+  "\\be\\b",          // "e hoje?", "e em football?"
+  "\\bem vez\\b",
+  "\\btambem\\b",
+  "\\btambém\\b",
+  "\\besse\\b", "\\bessa\\b", "\\bisso\\b",
+  "\\beste\\b", "\\besta\\b", "\\bisto\\b",
+  "\\bo mesmo\\b", "\\ba mesma\\b",
+  "\\bagora\\b",
+  "\\bcompara\\b", "\\bcomparado\\b",
+  "\\bem vez disso\\b",
+  // EN (caso o utilizador escreva em inglês)
+  "\\band\\b", "\\bthat\\b", "\\bthis\\b", "\\bsame\\b", "\\binstead\\b",
+];
+
+function questionNeedsContext(question = "") {
+  const normalized = String(question)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (normalized.length === 0) return false;
+  // Mensagens curtas (≤ 4 palavras) são frequentemente continuações.
+  const wordCount = normalized.split(/\s+/).length;
+  if (wordCount <= 4) return true;
+  return AMBIGUITY_MARKERS.some((pat) => new RegExp(pat, "i").test(normalized));
+}
+
+function recentTurns(history, limit = 2) {
+  if (!Array.isArray(history) || history.length === 0) return [];
+  // Cada "turn" = um par user+assistant. limit=2 → últimas 2 trocas = 4 mensagens.
+  const userMessages = history.filter((m) => m.role === "user" || m.role === "assistant");
+  return userMessages.slice(-(limit * 2));
+}
+
+function formatHistory(turns) {
+  if (turns.length === 0) return "(sem histórico)";
+  return turns.map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`).join("\n");
+}
+
 // ─── Prompts ───────────────────────────────────────────────────────────────
 
 function buildToolsList() {
@@ -89,17 +126,21 @@ function buildToolsList() {
     .join("\n");
 }
 
-function buildRouterPrompt(question, datasetContext) {
+function buildRouterPrompt(question, datasetContext, contextTurns) {
   const toolsList = buildToolsList();
   const ctx = datasetContext
-    ? `Dataset disponível: ${datasetContext.totalBets} apostas. Sports: ${datasetContext.sports.slice(0, 8).join(", ")}. betTypes: ${datasetContext.betTypes.slice(0, 8).join(", ")}. Top selections: ${datasetContext.topSelections.slice(0, 5).map((s) => s.selection).join(", ")}. Top events: ${datasetContext.topEvents.slice(0, 5).map((e) => e.event).join(", ")}.`
+    ? `Dataset: ${datasetContext.totalBets} apostas. Sports: ${datasetContext.sports.slice(0, 8).join(", ")}. betTypes: ${datasetContext.betTypes.slice(0, 8).join(", ")}. Top selections: ${datasetContext.topSelections.slice(0, 5).map((s) => s.selection).join(", ")}. Top events: ${datasetContext.topEvents.slice(0, 5).map((e) => e.event).join(", ")}.`
+    : "";
+
+  const historyBlock = contextTurns.length > 0
+    ? `Recent conversation (use to resolve references like "e hoje?", "esse evento", "também"):\n${formatHistory(contextTurns)}\n`
     : "";
 
   return [
     "You are a tool router for a sports-betting risk assistant.",
     "Given a user question in Portuguese or English, pick exactly ONE tool from the catalog and the params it needs.",
     "Output STRICT JSON only, no prose, no markdown, no explanation. Schema:",
-    '{"tool":"<tool-name>","params":{"period":"today|yesterday|1h|24h|7d|all","selection":"<text>?","event":"<text>?","sport":"<text>?","limit":<number>?}}',
+    '{"tool":"<tool-name>","params":{"period":"today|yesterday|1h|24h|7d|all","selection":"<text>?","event":"<text>?","sport":"<text>?","limit":<number>?,"periodA":"<period>?","periodB":"<period>?","metric":"<metric>?"}}',
     "",
     "Available tools:",
     toolsList,
@@ -116,10 +157,14 @@ function buildRouterPrompt(question, datasetContext) {
     "- 'betType mais comum para apostas no sport X' → top-bettype-sport, params.sport='X'.",
     "- 'altura do dia / hora com mais apostas ontem' → peak-hour, period=yesterday.",
     "- 'altura do dia / hora com mais apostas no sport X' → peak-hour-sport, params.sport='X', period=7d.",
+    "- 'comparar X vs Y', 'como está hoje vs ontem', 'esta semana vs semana passada' → compare-periods (set periodA and periodB; optional metric=betCount|totalStake|totalExposure|averageOdd).",
+    "- 'alertas', 'anomalias', 'análise de risco', 'briefing', 'algum padrão suspeito' → detect-anomalies.",
     "- 'resumo geral' → summary.",
     "- When extracting 'selection', 'event', or 'sport' from the question, copy the literal text from the question, do not translate. Examples: 'na selection Draw' → selection='Draw'; 'no evento Benfica vs Porto' → event='Benfica vs Porto'; 'no sport Tennis' → sport='Tennis'.",
+    "- If history is provided and the question references something earlier (e.g. starts with 'e ', 'também', 'agora'), inherit the previous tool's params (sport/event/selection) and adjust only what changed.",
     "- If no tool fits cleanly, choose 'summary' with period=24h.",
     "",
+    historyBlock,
     ctx,
     "",
     `Question: ${question}`,
@@ -128,13 +173,7 @@ function buildRouterPrompt(question, datasetContext) {
 }
 
 function buildComposerPrompt({ question, toolResult, history }) {
-  const historyBlock = Array.isArray(history) && history.length > 0
-    ? history
-        .slice(-4)
-        .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`)
-        .join("\n")
-    : "(sem histórico)";
-
+  const historyBlock = formatHistory(recentTurns(history, 2));
   const toolData = toolResult.data ? JSON.stringify(toolResult.data) : "null";
 
   return [
@@ -151,18 +190,33 @@ function buildComposerPrompt({ question, toolResult, history }) {
     "",
     `Pergunta do utilizador: ${question}`,
     `Tool executada: ${toolResult.tool}`,
-    `Resposta determinística (fallback caso o LLM falhe): ${toolResult.answer}`,
+    `Resposta determinística (fallback): ${toolResult.answer}`,
     `Dados da tool: ${toolData}`,
     "",
     "Resposta final:",
   ].join("\n");
 }
 
-function buildChitChatPrompt(question, history) {
-  const historyBlock = Array.isArray(history) && history.length > 0
-    ? history.slice(-4).map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text}`).join("\n")
-    : "(sem histórico)";
+function buildRiskBriefingPrompt({ toolResult }) {
+  const anomalies = toolResult.data?.anomalies || [];
+  return [
+    "És o analista de risco da Blip. Vais compor um briefing operacional curto para a equipa que opera o livro.",
+    "Português europeu. Tom: profissional, factual, sem dramatismo, sem floreados.",
+    "",
+    "FORMATO (segue à risca):",
+    "- 1ª linha: avaliação geral em 1 frase ('Operação estável.' / 'Atenção pontual.' / 'Vários alertas em simultâneo — recomenda-se revisão imediata.').",
+    "- A seguir: bullets, um por alerta, na ordem em que vêm. Cada bullet começa com [SEVERIDADE] e descreve o alerta + 1 ação concreta sugerida (ex.: 'reduzir limite', 'pausar mercado', 'rever liability').",
+    "- NÃO inventes alertas; usa só os que estão nos dados.",
+    "- Se a lista vier vazia: responde apenas 'Sem padrões anómalos detetados.' e nada mais.",
+    "",
+    `Dados (lista de anomalias detetadas):\n${JSON.stringify(anomalies, null, 2)}`,
+    "",
+    "Briefing:",
+  ].join("\n");
+}
 
+function buildChitChatPrompt(question, history) {
+  const historyBlock = formatHistory(recentTurns(history, 2));
   return [
     "És o Risk Assistant da Blip, integrado num dashboard de análise de risco para casas de apostas.",
     "Respondes em Português europeu, de forma natural, simpática e profissional. Mantém respostas curtas (1–4 frases).",
@@ -193,7 +247,8 @@ function safeJsonParse(rawText) {
   }
 }
 
-const VALID_PERIODS = new Set(["today", "yesterday", "1h", "24h", "7d", "all"]);
+const VALID_PERIODS = new Set(["today", "yesterday", "1h", "24h", "7d", "14d", "all"]);
+const VALID_METRICS = new Set(["betCount", "totalStake", "totalExposure", "averageOdd"]);
 
 function normalizeRoute(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
@@ -206,6 +261,15 @@ function normalizeRoute(parsed) {
   const params = {};
   if (rawParams.period && VALID_PERIODS.has(rawParams.period)) {
     params.period = rawParams.period;
+  }
+  if (rawParams.periodA && VALID_PERIODS.has(rawParams.periodA)) {
+    params.periodA = rawParams.periodA;
+  }
+  if (rawParams.periodB && VALID_PERIODS.has(rawParams.periodB)) {
+    params.periodB = rawParams.periodB;
+  }
+  if (rawParams.metric && VALID_METRICS.has(rawParams.metric)) {
+    params.metric = rawParams.metric;
   }
   if (typeof rawParams.selection === "string" && rawParams.selection.trim()) {
     params.selection = rawParams.selection.trim();
@@ -223,7 +287,7 @@ function normalizeRoute(parsed) {
   return { tool: toolName, params };
 }
 
-// ─── Router heurístico (apenas fallback se LLM falhar no estágio 1) ────────
+// ─── Router heurístico (fallback) ─────────────────────────────────────────
 
 function heuristicRoute(question = "") {
   const q = String(question)
@@ -241,15 +305,11 @@ function heuristicRoute(question = "") {
           ? "1h"
           : "24h";
 
-  // Tenta extrair "selection X", "evento Y", "sport Z" do texto bruto
-  // (mantém a caixa original para correspondência). As stop-words limitam
-  // a captura ao nome real (evita apanhar "X com base na última semana").
-  const STOPS = /(?:\s+(?:com|para|na|no|nas|nos|de|do|da|das|dos|com base|baseado|baseada|baseando|durante|nas|últim|ultim)|[?.!,])/i;
+  const STOPS = /(?:\s+(?:com|para|na|no|nas|nos|de|do|da|das|dos|com base|baseado|baseada|baseando|durante|últim|ultim)|[?.!,])/i;
   const extractAfter = (re) => {
     const match = String(question).match(re);
     if (!match) return null;
     const raw = match[1].trim();
-    // Corta no primeiro stop-word/pontuação
     const stopMatch = raw.match(STOPS);
     const cleaned = stopMatch ? raw.slice(0, stopMatch.index) : raw;
     return cleaned.trim() || null;
@@ -258,6 +318,16 @@ function heuristicRoute(question = "") {
   const selection = extractAfter(/(?:selection|seleção|selecao)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,60}?)(?=[?.!,]|$)/i);
   const event = extractAfter(/(?:evento|event|jogo)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,80}?)(?=[?.!,]|$)/i);
   const sport = extractAfter(/(?:sport|desporto)\s+([A-Za-zÀ-ÿ0-9 ./-]{2,40}?)(?=[?.!,]|$)/i);
+
+  if (q.includes("anomali") || q.includes("alerta") || q.includes("padrao suspeito") || q.includes("padrão suspeito") || q.includes("briefing") || q.includes("analise de risco") || q.includes("análise de risco")) {
+    return { tool: "detect-anomalies", params: {} };
+  }
+
+  if (q.includes("compar") || q.includes("vs") || (q.includes("hoje") && q.includes("ontem"))) {
+    const periodA = q.includes("hoje") ? "today" : "24h";
+    const periodB = q.includes("ontem") ? "yesterday" : q.includes("semana passada") || q.includes("ultima semana") ? "7d" : "yesterday";
+    return { tool: "compare-periods", params: { periodA, periodB } };
+  }
 
   if (q.includes("selection") || q.includes("seleção") || q.includes("selecao")) {
     if (q.includes("odd mais usada") || q.includes("odd mais frequente") || q.includes("moda")) {
@@ -327,6 +397,7 @@ const DOMAIN_KEYWORDS = [
   "bettype", "bet type", "mercado", "legs", "leg", "casa", "house",
   "football", "futebol", "basket", "basketball", "tennis", "tenis", "tênis",
   "resumo", "summary", "overview", "hora", "altura", "pico",
+  "anomali", "alerta", "briefing", "padrao", "padrão", "comparar", "vs",
 ];
 
 function isDomainQuestion(question = "") {
@@ -336,7 +407,7 @@ function isDomainQuestion(question = "") {
 
 // ─── Estágio 1: routing ────────────────────────────────────────────────────
 
-async function llmRoute(question, datasetContext) {
+async function llmRoute(question, datasetContext, contextTurns) {
   const engine = await getEngine();
   if (!engine) return null;
 
@@ -344,10 +415,10 @@ async function llmRoute(question, datasetContext) {
     const response = await engine.chat.completions.create({
       messages: [
         { role: "system", content: "You output ONLY valid JSON. No prose, no markdown." },
-        { role: "user", content: buildRouterPrompt(question, datasetContext) },
+        { role: "user", content: buildRouterPrompt(question, datasetContext, contextTurns) },
       ],
       temperature: 0.1,
-      max_tokens: 180,
+      max_tokens: 200,
     });
     const text = response?.choices?.[0]?.message?.content || "";
     const parsed = safeJsonParse(text);
@@ -358,64 +429,91 @@ async function llmRoute(question, datasetContext) {
   }
 }
 
-// ─── Estágio 2: composição da resposta ─────────────────────────────────────
+// ─── Estágio 2: composição da resposta (com STREAMING) ─────────────────────
 
-async function llmCompose({ question, toolResult, history }) {
+async function llmComposeStreamed({ question, toolResult, history, onToken, promptBuilder }) {
   const engine = await getEngine();
   if (!engine) return null;
 
+  const builder = promptBuilder || buildComposerPrompt;
+
   try {
-    const response = await engine.chat.completions.create({
+    const stream = await engine.chat.completions.create({
+      stream: true,
       messages: [
         {
           role: "system",
           content: "És um assistant profissional de análise de risco em apostas desportivas. Falas em Português europeu. Respondes de forma curta e clara, baseando-te apenas nos dados fornecidos.",
         },
-        { role: "user", content: buildComposerPrompt({ question, toolResult, history }) },
+        { role: "user", content: builder({ question, toolResult, history }) },
       ],
       temperature: 0.3,
-      max_tokens: 220,
+      max_tokens: 260,
     });
 
-    return (response?.choices?.[0]?.message?.content || "").trim();
+    let full = "";
+    for await (const chunk of stream) {
+      const delta = chunk?.choices?.[0]?.delta?.content || "";
+      if (delta) {
+        full += delta;
+        if (typeof onToken === "function") {
+          try { onToken(delta); } catch { /* swallow consumer errors */ }
+        }
+      }
+    }
+    return full.trim();
   } catch (error) {
-    console.warn("[WebLLM] composer falhou:", error);
+    console.warn("[WebLLM] composer streamed falhou:", error);
     return null;
   }
 }
 
-async function llmChitChat(question, history) {
+async function llmChitChatStreamed(question, history, onToken) {
   const engine = await getEngine();
   if (!engine) return null;
 
   try {
-    const response = await engine.chat.completions.create({
+    const stream = await engine.chat.completions.create({
+      stream: true,
       messages: [
-        {
-          role: "system",
-          content: "És o Risk Assistant da Blip. Falas em Português europeu de forma natural e curta.",
-        },
+        { role: "system", content: "És o Risk Assistant da Blip. Falas em Português europeu de forma natural e curta." },
         { role: "user", content: buildChitChatPrompt(question, history) },
       ],
       temperature: 0.5,
-      max_tokens: 180,
+      max_tokens: 200,
     });
 
-    return (response?.choices?.[0]?.message?.content || "").trim();
+    let full = "";
+    for await (const chunk of stream) {
+      const delta = chunk?.choices?.[0]?.delta?.content || "";
+      if (delta) {
+        full += delta;
+        if (typeof onToken === "function") {
+          try { onToken(delta); } catch { /* ignore */ }
+        }
+      }
+    }
+    return full.trim();
   } catch (error) {
-    console.warn("[WebLLM] chit-chat falhou:", error);
+    console.warn("[WebLLM] chit-chat streamed falhou:", error);
     return null;
   }
 }
 
+// ─── Emissão sintética de "stream" para o caminho determinístico ───────────
+// Garante que o componente nunca precisa de tratar dois caminhos diferentes:
+// quando o LLM não está disponível, emitimos a string inteira como um único token.
+function emitDeterministic(text, onToken) {
+  if (typeof onToken === "function" && text) {
+    try { onToken(text); } catch { /* ignore */ }
+  }
+  return text;
+}
+
 // ─── API pública ───────────────────────────────────────────────────────────
 
-/**
- * Resposta para perguntas fora do domínio (small talk, perguntas gerais).
- * Usado quando o utilizador escreve algo que não toca apostas/risco.
- */
-async function handleGeneralQuestion(question, history) {
-  // Atalho determinístico para aritmética trivial (ex.: "2+2"), sempre certo
+async function handleGeneralQuestion(question, history, onToken) {
+  // Aritmética trivial — sempre determinística
   const mathMatch = String(question).trim().match(/^\s*(-?\d+(?:[.,]\d+)?)\s*([+\-*/x×])\s*(-?\d+(?:[.,]\d+)?)\s*\?*\s*$/);
   if (mathMatch) {
     const a = Number(mathMatch[1].replace(",", "."));
@@ -426,77 +524,103 @@ async function handleGeneralQuestion(question, history) {
     if (op === "-") r = a - b;
     if (op === "*" || op === "x" || op === "×") r = a * b;
     if (op === "/") r = b === 0 ? null : a / b;
-    if (Number.isFinite(r)) return `${a} ${op} ${b} = ${r}.`;
+    if (Number.isFinite(r)) return emitDeterministic(`${a} ${op} ${b} = ${r}.`, onToken);
   }
 
   if (currentStatus === "ready") {
-    const reply = await llmChitChat(question, history);
+    const reply = await llmChitChatStreamed(question, history, onToken);
     if (reply) return reply;
   }
 
-  // Fallbacks simples
   const q = question.toLowerCase();
   if (q.includes("ola") || q.includes("olá") || q.includes("hello") || q.includes("boas") || q.includes("hey") || q.includes("hi")) {
-    return "Olá! Sou o Risk Assistant. Pergunta-me sobre as apostas no dashboard — selections, betTypes, picos de atividade, exposição da casa, etc.";
+    return emitDeterministic("Olá! Sou o Risk Assistant. Pergunta-me sobre as apostas no dashboard — selections, betTypes, picos de atividade, exposição da casa, etc.", onToken);
   }
   if (q.includes("quem es") || q.includes("quem és") || q.includes("o que fazes") || q.includes("what are you")) {
-    return "Sou um assistant client-side baseado em Llama (via WebLLM). Analiso os dados de apostas que estão no dashboard e ajudo a perceber risco, padrões e exposição.";
+    return emitDeterministic("Sou um assistant client-side baseado em Llama (via WebLLM). Analiso os dados de apostas que estão no dashboard e ajudo a perceber risco, padrões e exposição.", onToken);
   }
   if (q.includes("obrigad") || q.includes("thanks") || q.includes("thank you")) {
-    return "Sempre às ordens.";
+    return emitDeterministic("Sempre às ordens.", onToken);
   }
 
   if (currentStatus === "loading") {
-    return `O modelo Llama ainda está a carregar (${Math.round((currentProgress || 0) * 100)}%). Posso responder a perguntas concretas sobre apostas; para conversa geral, espera só um pouco.`;
+    return emitDeterministic(`O modelo Llama ainda está a carregar (${Math.round((currentProgress || 0) * 100)}%). Posso responder a perguntas concretas sobre apostas; para conversa geral, espera só um pouco.`, onToken);
   }
 
-  return "Posso ajudar com perguntas sobre as apostas no dashboard. Por exemplo: 'qual foi a selection com mais apostas ontem?' ou 'qual é a distribuição de bets por betType hoje?'";
+  return emitDeterministic("Posso ajudar com perguntas sobre as apostas no dashboard. Por exemplo: 'qual foi a selection com mais apostas ontem?' ou 'qual é a distribuição de bets por betType hoje?'", onToken);
 }
 
 /**
  * Função principal: o componente chama isto com a pergunta + as apostas
- * em memória + histórico recente. Devolve string final pronta a mostrar.
+ * em memória + histórico recente + onToken.
+ *
+ * onToken: opcional. Se fornecido, é chamado com cada delta à medida que
+ * o LLM produz tokens. No caminho determinístico, é chamado uma vez com
+ * a string completa — o componente não precisa de saber a diferença.
  */
-export async function answerQuestion({ question, bets, history = [] }) {
+export async function answerQuestion({ question, bets, history = [], onToken }) {
   const cleanQuestion = String(question || "").trim();
   if (!cleanQuestion) return "";
 
-  // 1) Perguntas claramente fora de domínio → conversational
+  // 1) Perguntas fora de domínio → conversational
   if (!isDomainQuestion(cleanQuestion)) {
-    const reply = await handleGeneralQuestion(cleanQuestion, history);
-    if (reply) return reply;
+    return await handleGeneralQuestion(cleanQuestion, history, onToken);
   }
 
-  // 2) Routing — LLM se disponível, senão heurístico mínimo
+  // 2) Routing — multi-turn só quando faz sentido
   const datasetContext = describeDataset(bets);
+  const contextTurns = questionNeedsContext(cleanQuestion) ? recentTurns(history, 2) : [];
+
   let route = null;
   if (currentStatus === "ready") {
-    route = await llmRoute(cleanQuestion, datasetContext);
+    route = await llmRoute(cleanQuestion, datasetContext, contextTurns);
   }
   if (!route) {
     route = heuristicRoute(cleanQuestion);
   }
 
-  // 3) Executar a tool (sempre determinístico, sobre os dados do frontend)
+  // 3) Executar a tool
   const toolResult = runTool(route.tool, bets, route.params);
 
-  // 4) Compor resposta final
-  //    - Se o LLM estiver pronto, usamos para frasear naturalmente.
-  //    - Caso contrário, devolvemos a resposta determinística da tool
-  //      (que já é uma frase completa em PT-PT).
+  // 4) Compor resposta
   if (currentStatus === "ready" && toolResult.answer) {
-    const composed = await llmCompose({ question: cleanQuestion, toolResult, history });
-    if (composed && composed.length > 0) {
-      return composed;
-    }
+    const composed = await llmComposeStreamed({
+      question: cleanQuestion,
+      toolResult,
+      history,
+      onToken,
+    });
+    if (composed && composed.length > 0) return composed;
   }
 
-  return toolResult.answer || "Não consegui obter dados suficientes para responder. Tenta reformular a pergunta.";
+  return emitDeterministic(
+    toolResult.answer || "Não consegui obter dados suficientes para responder. Tenta reformular a pergunta.",
+    onToken,
+  );
 }
 
 /**
- * Helper exposto: lista de exemplos de perguntas suportadas (para UI).
+ * Modo dedicado: Análise de Risco / briefing operacional.
+ * Corre detect-anomalies e usa um prompt diferente do composer normal,
+ * focado em produzir um briefing curto com ações sugeridas.
  */
+export async function runRiskAnalysis({ bets, history = [], onToken }) {
+  const toolResult = runTool("detect-anomalies", bets, {});
+
+  if (currentStatus === "ready") {
+    const composed = await llmComposeStreamed({
+      question: "Análise de risco — gera o briefing operacional.",
+      toolResult,
+      history,
+      onToken,
+      promptBuilder: buildRiskBriefingPrompt,
+    });
+    if (composed && composed.length > 0) return composed;
+  }
+
+  return emitDeterministic(toolResult.answer, onToken);
+}
+
 export const SUPPORTED_QUESTIONS = [
   "Qual foi a selection que teve mais apostas ontem?",
   "Qual foi a odd mais usada nas apostas para a selection Draw?",
