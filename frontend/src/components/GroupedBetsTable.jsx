@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import "./GroupedBetsTable.scss"
 import BetAnalysisPopover from "./BetAnalysisPopover"
+import HighlightRulesSheet from "./HighlightRulesSheet"
+import { getRowHighlight } from "../utils/highlightRules"
 
 const WS_RECONNECT_DELAY_MS = 1000
 const FILTER_DEBOUNCE_MS = 300
@@ -46,12 +48,6 @@ function formatTimeAgo(isoDate) {
   return `${days}d`
 }
 
-function getHighlightClass(group) {
-  if (group.totalStake > 8000) return "row-highlight-red"
-  if (group.betCount > 500) return "row-highlight-orange"
-  return ""
-}
-
 // Mapeia a linha agregada do endpoint (snake_case) para a forma usada na UI.
 function mapGroup(row) {
   return {
@@ -78,7 +74,7 @@ function SortButton({ label, field, sortField, sortOrder, onSort }) {
   )
 }
 
-export default function GroupedBetsTable() {
+export default function GroupedBetsTable({ highlightRules = [], onRulesChange }) {
   const [searchText, setSearchText] = useState("")
   const [selectedSport, setSelectedSport] = useState("all")
   const [minOdds, setMinOdds] = useState("")
@@ -250,7 +246,10 @@ export default function GroupedBetsTable() {
 
   return (
     <div className="grouped-bets-view">
-      <h1>Análise de Riscos - Apostas Agrupadas</h1>
+      <div className="view-header">
+        <h1>Análise de Riscos - Apostas Agrupadas</h1>
+        <HighlightRulesSheet rules={highlightRules} onRulesChange={onRulesChange} />
+      </div>
 
       <div className="grouped-filters">
         <div className="filter-item search-box">
@@ -259,7 +258,7 @@ export default function GroupedBetsTable() {
             type="text"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Pesquisar ID"
+            placeholder="Pesquisar selection, evento ou mercado..."
           />
         </div>
 
@@ -390,8 +389,14 @@ export default function GroupedBetsTable() {
                 </td>
               </tr>
             ) : (
-              groupedData.map((group, index) => (
-                <tr key={`${group.event}-${group.market}-${group.selection}-${group.odds}-${index}`} className={getHighlightClass(group)}>
+              groupedData.map((group, index) => {
+                const highlight = getRowHighlight(highlightRules, group)
+                return (
+                <tr
+                  key={`${group.event}-${group.market}-${group.selection}-${group.odds}-${index}`}
+                  className={highlight ? "row-highlighted" : ""}
+                  style={highlight ? { "--row-highlight-border": highlight.borderColor, background: highlight.background } : undefined}
+                >
                   <td className="sport-cell">{group.sport}</td>
                   <td>{group.event}</td>
                   <td>{group.market}</td>
@@ -404,7 +409,8 @@ export default function GroupedBetsTable() {
                   <td className="align-right mono exposure">€{group.totalExposure.toFixed(0)}</td>
                   <td className="mono">{formatTimeAgo(group.lastBetPlacedAt)}</td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./AssistantChat.scss";
+import { isRuleManagementIntent } from "../utils/highlightRules";
 
 // Janela de apostas pedida ao servidor por pergunta. As ferramentas de análise
 // continuam a correr no cliente, mas sobre um conjunto LIMITADO obtido on-demand
@@ -32,7 +33,7 @@ async function fetchBetsWindow() {
  *  - Multi-turn: histórico recente é passado quando a pergunta tem referências.
  *  - Atalho: Ctrl+M / Cmd+M abre/fecha.
  */
-export default function AssistantChat() {
+export default function AssistantChat({ highlightRules = [], onRulesChange }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -156,6 +157,26 @@ export default function AssistantChat() {
     });
 
     try {
+      // Gestão de Regras de Highlight em linguagem natural (não corre analytics).
+      if (isRuleManagementIntent(clean)) {
+        if (clientApi && typeof clientApi.manageHighlightRules === "function") {
+          const { nextRules } = await clientApi.manageHighlightRules({
+            question: clean,
+            rules: highlightRules,
+            onToken: appendToLastAssistant,
+          });
+          if (typeof onRulesChange === "function" && Array.isArray(nextRules)) {
+            onRulesChange(nextRules);
+          }
+          finalizeStreaming("");
+        } else {
+          const msg = "O assistente ainda está a inicializar. Tenta de novo em alguns segundos.";
+          appendToLastAssistant(msg);
+          finalizeStreaming(msg);
+        }
+        return;
+      }
+
       const bets = await fetchBetsWindow();
       const history = nextMessages
         .filter((m) => m.role === "user" || m.role === "assistant")
@@ -260,6 +281,7 @@ export default function AssistantChat() {
     { label: "betType mais comum — Football", text: "Qual é o betType mais comum para apostas no sport Football?" },
     { label: "Hoje vs ontem", text: "Compara o volume e exposição de hoje vs ontem." },
     { label: "Resumo geral 24h", text: "Dá-me um resumo geral das últimas 24 horas." },
+    { label: "Regra: destacar stake alto", text: "Adiciona uma regra para destacar linhas com stake total maior que 8000" },
   ];
 
   return (

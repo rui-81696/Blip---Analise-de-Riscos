@@ -5,8 +5,9 @@
   "scripts": {
     "test:latency": "playwright test e2e/latency.spec.js",
     "test:latency:headed": "playwright test e2e/latency.spec.js --headed",
-    "test:webllm": "playwright test e2e/webllm.spec.js",
-    "test:webllm:headed": "playwright test e2e/webllm.spec.js --headed"
+    "test:api": "playwright test e2e/api-realtime.spec.js",
+    "test:api:headed": "playwright test e2e/api-realtime.spec.js --headed",
+    "test:highlight": "playwright test e2e/highlight-rules.spec.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.2",

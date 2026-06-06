@@ -3,8 +3,16 @@
   gap: 1rem;
 
   h1 {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0;
   }
+}
+
+// Cabeçalho: título + ações (botão de regras) no topo direito, mesma linha.
+.view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .grouped-filters {
@@ -186,14 +194,10 @@
   }
 }
 
-.row-highlight-red {
-  border-left: 3px solid #ff6b6b;
-  background: rgba(210, 64, 64, 0.1);
-}
-
-.row-highlight-orange {
-  border-left: 3px solid #ffbf69;
-  background: rgba(214, 142, 27, 0.1);
+// Linha destacada por uma Regra de Highlight. A cor vem inline (--row-highlight-border)
+// e é aplicada como borda esquerda na primeira célula (border-collapse-friendly).
+.row-highlighted td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--row-highlight-border, #ff6b6b);
 }
 
 @media (max-width: 760px) {

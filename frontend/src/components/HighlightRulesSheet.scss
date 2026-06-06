@@ -1,0 +1,314 @@
+// Trigger — compacto, fica no topo direito sem adicionar espaçamento vertical.
+.hr-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card), transparent 20%);
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--input-hover);
+  }
+
+  .hr-trigger-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.7rem;
+    font-weight: var(--font-weight-bold);
+  }
+}
+
+// Overlay + Sheet.
+.hr-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 50;
+  animation: hr-overlay-in 0.15s ease-out;
+}
+
+@keyframes hr-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hr-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 51;
+  height: 100vh;
+  width: 420px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.45);
+  animation: hr-sheet-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &:focus {
+    outline: none;
+  }
+}
+
+@keyframes hr-sheet-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.hr-sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.hr-sheet-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+.hr-sheet-subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+
+  strong {
+    color: var(--foreground);
+  }
+}
+
+.hr-sheet-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.hr-sheet-footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.hr-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    color: var(--foreground);
+    border-color: var(--input-hover);
+  }
+
+  &.on {
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+
+  &.danger:hover {
+    color: var(--destructive-hover);
+    border-color: color-mix(in srgb, var(--destructive), transparent 40%);
+  }
+}
+
+// Estado vazio.
+.hr-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted-foreground);
+  padding: 2rem 1rem;
+
+  svg {
+    opacity: 0.4;
+    width: 34px;
+    height: 34px;
+  }
+}
+
+.hr-empty-title {
+  margin: 0.6rem 0 0.2rem;
+  color: var(--foreground);
+  font-weight: var(--font-weight-semibold);
+}
+
+.hr-empty-sub {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+// Cartão de regra.
+.hr-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.75rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  transition: opacity 0.15s ease;
+
+  &.inactive {
+    opacity: 0.55;
+  }
+}
+
+.hr-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hr-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--foreground);
+  font-size: 0.92rem;
+  font-weight: var(--font-weight-medium);
+  padding: 0.3rem 0.4rem;
+
+  &:hover {
+    border-color: var(--border);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--ring);
+    background: var(--card);
+  }
+}
+
+.hr-card-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.hr-card-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 0.9fr 1fr;
+  gap: 0.45rem;
+
+  select,
+  input {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--input-border);
+    border-radius: 7px;
+    color: var(--foreground);
+    padding: 0.4rem 0.5rem;
+    font-size: 0.82rem;
+    min-height: 34px;
+
+    &:focus {
+      outline: none;
+      border-color: var(--ring);
+      box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.25);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.hr-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.hr-swatches {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.hr-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.15s ease;
+
+  &:hover {
+    transform: scale(1.12);
+  }
+
+  &.selected {
+    border-color: var(--foreground);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+.hr-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+  text-align: right;
+}
+
+// Botão adicionar.
+.hr-add-button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px dashed var(--input-border);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary), transparent 88%);
+  }
+}
