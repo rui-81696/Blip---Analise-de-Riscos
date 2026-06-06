@@ -1,13 +1,12 @@
-/* eslint-disable react-hooks/purity */
 import { useEffect, useMemo, useRef, useState } from "react"
 import "./GroupedBetsTable.scss"
-import { appendStoredBets, loadStoredBets, normalizeBet } from "../utils/betsStore"
+import { appendStoredBets, getRangeStartMs, loadStoredBets, normalizeBet } from "../utils/betsStore"
+import BetAnalysisPopover from "./BetAnalysisPopover"
 
 const REFRESH_THROTTLE_MS = 1000
 const WS_RECONNECT_DELAY_MS = 1000
 const FILTER_DEBOUNCE_MS = 300
 const MAX_GROUP_ROWS = 500
-const ONE_MINUTE_MS = 60 * 1000
 
 function useDebouncedValue(value, delayMs) {
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -23,42 +22,6 @@ function useDebouncedValue(value, delayMs) {
   }, [delayMs, value])
 
   return debouncedValue
-}
-
-function getMinuteKey(timestamp) {
-  return Math.floor(new Date(timestamp).getTime() / ONE_MINUTE_MS)
-}
-
-function getTodayStartMinuteKey() {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  return Math.floor(todayStart.getTime() / ONE_MINUTE_MS)
-}
-
-function createGroupAccumulatorFromBet(bet) {
-  return {
-    sport: bet.sport,
-    event: bet.event,
-    market: bet.betType,
-    selection: bet.selection,
-    odds: bet.odd,
-    betCount: 1,
-    totalStake: bet.stake,
-    totalExposure: bet.potentialProfit,
-    lastBetPlacedAt: bet.timestamp,
-    lastBetTsMs: new Date(bet.timestamp).getTime(),
-  }
-}
-
-function mergeGroupAccumulator(target, source) {
-  target.betCount += source.betCount
-  target.totalStake += source.totalStake
-  target.totalExposure += source.totalExposure
-
-  if (source.lastBetTsMs > target.lastBetTsMs) {
-    target.lastBetTsMs = source.lastBetTsMs
-    target.lastBetPlacedAt = source.lastBetPlacedAt
-  }
 }
 
 function getWebSocketUrl() {
@@ -123,7 +86,7 @@ export default function GroupedBetsTable() {
 
   const [sports, setSports] = useState(["all"])
   const [status, setStatus] = useState("connecting")
-  const [dataVersion, setDataVersion] = useState(0)
+  const [allBets, setAllBets] = useState(loadStoredBets)
 
   const debouncedSearchText = useDebouncedValue(searchText, FILTER_DEBOUNCE_MS)
   const debouncedSelectedSport = useDebouncedValue(selectedSport, FILTER_DEBOUNCE_MS)
@@ -134,48 +97,65 @@ export default function GroupedBetsTable() {
   const debouncedMaxStake = useDebouncedValue(maxStake, FILTER_DEBOUNCE_MS)
   const debouncedTimeRange = useDebouncedValue(timeRange, FILTER_DEBOUNCE_MS)
 
-  const minuteBucketsRef = useRef(new Map())
   const seenIdsRef = useRef(new Set())
   const sportSetRef = useRef(new Set())
   const refreshTimerRef = useRef(null)
   const reconnectTimerRef = useRef(null)
 
-  // Date.now used for time-bucket calculations; allow here despite purity rule.
-  /* eslint-disable-next-line react-hooks/purity */
   const { groupedData, summary } = useMemo(() => {
     const searchLower = debouncedSearchText.trim().toLowerCase()
-    const nowMinuteKey = Math.floor(Date.now() / ONE_MINUTE_MS)
+    const rangeStartMs = getRangeStartMs(debouncedTimeRange)
 
-    const minMinuteKey = debouncedTimeRange === -1 ? getTodayStartMinuteKey() : nowMinuteKey - Number(debouncedTimeRange)
-
+    // Agrega as apostas individuais (mesma fonte que o popover) aplicando a
+    // janela temporal sobre o timestamp de cada aposta.
     const groupedMap = new Map()
-    console.log(minuteBucketsRef.current, {minMinuteKey})
-    minuteBucketsRef.current.forEach((minuteGroups, minuteKey) => {
-      if (debouncedTimeRange!== -1 && minuteKey < minMinuteKey) return
-    
-      minuteGroups.forEach((sourceGroup, key) => {
-        if (debouncedSelectedSport !== "all" && sourceGroup.sport !== debouncedSelectedSport) return
-        if (debouncedMinOdds !== "" && sourceGroup.odds < debouncedMinOdds) return
-        if (debouncedMaxOdds !== "" && sourceGroup.odds > debouncedMaxOdds) return
-        if (sourceGroup.totalStake < debouncedMinStake) return
-        if (debouncedMaxStake !== "" && sourceGroup.totalStake > debouncedMaxStake) return
 
-        if (searchLower) {
-          const searchable = `${sourceGroup.event} ${sourceGroup.sport} ${sourceGroup.market} ${sourceGroup.selection}`.toLowerCase()
-          if (!searchable.includes(searchLower)) return
-        }
+    for (const bet of allBets) {
+      const betTsMs = new Date(bet.timestamp).getTime()
+      if (!Number.isFinite(betTsMs) || betTsMs < rangeStartMs) continue
+      if (debouncedSelectedSport !== "all" && bet.sport !== debouncedSelectedSport) continue
+      if (debouncedMinOdds !== "" && bet.odd < debouncedMinOdds) continue
+      if (debouncedMaxOdds !== "" && bet.odd > debouncedMaxOdds) continue
 
-        const existing = groupedMap.get(key)
-        if (existing) {
-          mergeGroupAccumulator(existing, sourceGroup)
-        } else {
-          groupedMap.set(key, { ...sourceGroup })
+      if (searchLower) {
+        const searchable = `${bet.event} ${bet.sport} ${bet.betType} ${bet.selection}`.toLowerCase()
+        if (!searchable.includes(searchLower)) continue
+      }
+
+      const key = `${bet.sport}|${bet.event}|${bet.betType}|${bet.selection}|${bet.odd.toFixed(2)}`
+      const existing = groupedMap.get(key)
+
+      if (existing) {
+        existing.betCount += 1
+        existing.totalStake += bet.stake
+        existing.totalExposure += bet.potentialProfit
+        if (betTsMs > existing.lastBetTsMs) {
+          existing.lastBetTsMs = betTsMs
+          existing.lastBetPlacedAt = bet.timestamp
         }
-      })
+      } else {
+        groupedMap.set(key, {
+          sport: bet.sport,
+          event: bet.event,
+          market: bet.betType,
+          selection: bet.selection,
+          odds: bet.odd,
+          betCount: 1,
+          totalStake: bet.stake,
+          totalExposure: bet.potentialProfit,
+          lastBetPlacedAt: bet.timestamp,
+          lastBetTsMs: betTsMs,
+        })
+      }
+    }
+
+    // Filtros ao nível do grupo (stake total e número mínimo de apostas).
+    const groups = Array.from(groupedMap.values()).filter((group) => {
+      if (group.totalStake < debouncedMinStake) return false
+      if (debouncedMaxStake !== "" && group.totalStake > debouncedMaxStake) return false
+      return group.betCount >= debouncedMinBets
     })
 
-    const groups = Array.from(groupedMap.values()).filter((group) => group.betCount >= debouncedMinBets)
-    
     groups.sort((a, b) => {
       const left = getSortValue(a, sortField)
       const right = getSortValue(b, sortField)
@@ -191,7 +171,7 @@ export default function GroupedBetsTable() {
       },
     }
   }, [
-    dataVersion,
+    allBets,
     debouncedMaxOdds,
     debouncedMaxStake,
     debouncedMinBets,
@@ -215,7 +195,7 @@ export default function GroupedBetsTable() {
 
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
-        setDataVersion((version) => version + 1)
+        setAllBets(loadStoredBets())
       }, REFRESH_THROTTLE_MS)
     }
 
@@ -228,36 +208,7 @@ export default function GroupedBetsTable() {
         const bet = normalizeBet(rawBet)
 
         if (bet.id === undefined || bet.id === null || seenIdsRef.current.has(bet.id)) continue
-
-        const minuteKey = getMinuteKey(bet.timestamp)
-        if (Number.isNaN(minuteKey)) continue
-
-        if (minuteBucketsRef.current.size > 1440) {
-          const oldestKey = Math.min(...minuteBucketsRef.current.keys())
-          minuteBucketsRef.current.delete(oldestKey)
-        }
-
-        let minuteGroups = minuteBucketsRef.current.get(minuteKey)
-        if (!minuteGroups) {
-          minuteGroups = new Map()
-          minuteBucketsRef.current.set(minuteKey, minuteGroups)
-        }
-
-        const groupKey = `${bet.sport}|${bet.event}|${bet.betType}|${bet.selection}|${bet.odd.toFixed(2)}`
-        const existing = minuteGroups.get(groupKey)
-
-        if (existing) {
-          existing.betCount += 1
-          existing.totalStake += bet.stake
-          existing.totalExposure += bet.potentialProfit
-          const betTsMs = new Date(bet.timestamp).getTime()
-          if (betTsMs > existing.lastBetTsMs) {
-            existing.lastBetTsMs = betTsMs
-            existing.lastBetPlacedAt = bet.timestamp
-          }
-        } else {
-          minuteGroups.set(groupKey, createGroupAccumulatorFromBet(bet))
-        }
+        if (Number.isNaN(new Date(bet.timestamp).getTime())) continue
 
         seenIdsRef.current.add(bet.id)
         if (bet.sport) sportSetRef.current.add(bet.sport)
@@ -454,6 +405,8 @@ export default function GroupedBetsTable() {
             <option value={60}>Período: 1 hora</option>
             <option value={120}>Período: 2 horas</option>
             <option value={-1}>Período: Hoje</option>
+            <option value={10080}>Período: Últimos 7 dias</option>
+            <option value={43200}>Período: Último mês</option>
           </select>
         </div>
 
@@ -511,7 +464,9 @@ export default function GroupedBetsTable() {
                   <td>{group.market}</td>
                   <td>{group.selection}</td>
                   <td className="align-right mono">{group.odds.toFixed(2)}</td>
-                  <td className="align-center mono">{group.betCount}</td>
+                  <td className="align-center">
+                    <BetAnalysisPopover group={group} timeRange={debouncedTimeRange} />
+                  </td>
                   <td className="align-right mono">€{group.totalStake.toFixed(0)}</td>
                   <td className="align-right mono exposure">€{group.totalExposure.toFixed(0)}</td>
                   <td className="mono">{formatTimeAgo(group.lastBetPlacedAt)}</td>

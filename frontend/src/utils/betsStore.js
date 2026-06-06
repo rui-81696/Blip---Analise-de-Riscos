@@ -1,5 +1,27 @@
 const STORAGE_KEY = "blip-risk:stored-bets:v1";
 
+const ONE_MINUTE_MS = 60 * 1000;
+
+/**
+ * Timestamp (ms) inicial da janela temporal para um dado intervalo.
+ *
+ * `timeRange === -1` significa "Hoje" (desde o início do dia atual).
+ * Qualquer outro valor é interpretado como número de minutos para trás
+ * a partir de agora (ex.: 60 = última hora, 10080 = 7 dias, 43200 = 30 dias).
+ *
+ * Usado tanto pela tabela como pelo popover de análise para garantir que
+ * filtram exatamente a mesma janela temporal.
+ */
+export function getRangeStartMs(timeRange) {
+  if (Number(timeRange) === -1) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return todayStart.getTime();
+  }
+
+  return Date.now() - Number(timeRange) * ONE_MINUTE_MS;
+}
+
 export function normalizeBet(rawBet) {
   return {
     id: rawBet.id,

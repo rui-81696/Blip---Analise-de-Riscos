@@ -1,0 +1,389 @@
+// Trigger: o número de apostas da célula estilizado como badge clicável.
+.bet-count-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.82rem;
+  font-weight: var(--font-weight-semibold);
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary), transparent 82%);
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 55%);
+  border-radius: 999px;
+  padding: 0.16rem 0.62rem;
+  min-width: 2.4rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--primary), transparent 68%);
+    border-color: var(--primary);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+
+  &[data-state="open"] {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+// Conteúdo do popover.
+.bap-content {
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: min(80vh, 560px);
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 0.9rem;
+  color: var(--foreground);
+  font-size: 0.85rem;
+  z-index: 40;
+  animation: bap-fade-in 0.12s ease-out;
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+@keyframes bap-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.bap-arrow {
+  fill: var(--card);
+}
+
+.bap-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.8rem;
+}
+
+.bap-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.bap-title {
+  font-size: 0.95rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+.bap-subtitle {
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+
+  strong {
+    color: var(--foreground);
+  }
+}
+
+.bap-header-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.bap-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    color: var(--foreground);
+    border-color: var(--input-hover);
+  }
+
+  &.active {
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+}
+
+.bap-empty {
+  color: var(--muted-foreground);
+  text-align: center;
+  padding: 1.2rem 0.5rem;
+  margin: 0;
+}
+
+.bap-section-title {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  font-weight: var(--font-weight-bold);
+  margin-bottom: 0.55rem;
+}
+
+// Quick stats.
+.bap-quickstats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.bap-quickstat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.5rem 0.55rem;
+}
+
+.bap-quickstat-label {
+  font-size: 0.68rem;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bap-quickstat-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+// Alerta automático.
+.bap-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: color-mix(in srgb, var(--destructive), transparent 86%);
+  border: 1px solid color-mix(in srgb, var(--destructive), transparent 55%);
+  border-radius: 9px;
+  padding: 0.55rem 0.65rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--foreground);
+
+  svg {
+    flex: 0 0 auto;
+    margin-top: 0.05rem;
+    color: var(--destructive-hover);
+  }
+
+  strong {
+    color: var(--destructive-hover);
+  }
+}
+
+// Distribuição.
+.bap-distribution {
+  display: flex;
+  flex-direction: column;
+}
+
+.bap-bucket {
+  padding: 0.45rem 0;
+
+  & + .bap-bucket {
+    border-top: 1px solid color-mix(in srgb, var(--border), transparent 45%);
+  }
+}
+
+.bap-bucket-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.bap-bucket-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-weight: var(--font-weight-medium);
+}
+
+.bap-bucket-bounds {
+  font-size: 0.68rem;
+  color: var(--muted-foreground);
+  font-weight: var(--font-weight-normal);
+}
+
+.bap-bucket-figures {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.bap-bucket-count {
+  font-weight: var(--font-weight-semibold);
+}
+
+.bap-bucket-pct {
+  font-size: 0.76rem;
+  color: var(--muted-foreground);
+}
+
+.bap-bar-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border), transparent 40%);
+  overflow: hidden;
+}
+
+.bap-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+
+  &.level-normal {
+    background: var(--primary);
+  }
+
+  &.level-warn {
+    background: #f5b74d;
+  }
+
+  &.level-suspect {
+    background: var(--destructive);
+  }
+}
+
+.bap-bucket-total {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+// Modo de configuração.
+.bap-config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.bap-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bap-config-name,
+.bap-config-num {
+  background: var(--surface);
+  border: 1px solid var(--input-border);
+  border-radius: 7px;
+  color: var(--foreground);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.8rem;
+  min-height: 30px;
+
+  &:focus {
+    outline: none;
+    border-color: var(--ring);
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.25);
+  }
+}
+
+.bap-config-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bap-config-num {
+  width: 58px;
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.bap-config-dash {
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.bap-config-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: var(--destructive-hover);
+    border-color: color-mix(in srgb, var(--destructive), transparent 40%);
+  }
+}
+
+.bap-config-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bap-btn-secondary,
+.bap-btn-ghost {
+  flex: 1 1 auto;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bap-btn-secondary {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--primary-foreground);
+
+  &:hover {
+    filter: brightness(1.1);
+  }
+}
+
+.bap-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+
+  &:hover {
+    color: var(--foreground);
+    border-color: var(--input-hover);
+  }
+}
