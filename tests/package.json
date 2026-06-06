@@ -7,7 +7,9 @@
     "test:latency:headed": "playwright test e2e/latency.spec.js --headed",
     "test:api": "playwright test e2e/api-realtime.spec.js",
     "test:api:headed": "playwright test e2e/api-realtime.spec.js --headed",
-    "test:highlight": "playwright test e2e/highlight-rules.spec.js"
+    "test:highlight": "playwright test e2e/highlight-rules.spec.js",
+    "test:assistant": "playwright test e2e/assistant-webllm.spec.js",
+    "test:assistant:headed": "playwright test e2e/assistant-webllm.spec.js --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.2",

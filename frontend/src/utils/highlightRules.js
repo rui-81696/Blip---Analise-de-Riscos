@@ -248,15 +248,17 @@ export function isRuleManagementIntent(question) {
   return RULE_INTENT_STEMS.some((stem) => normalized.includes(normalizeText(stem)))
 }
 
+// Nota: usamos prefixos (fronteira só à esquerda) para apanhar flexões — ex.:
+// "\bdesativ" casa "desativa", "desativar", "desativadas".
 function detectAction(normalized) {
-  if (/\b(remov|apaga|elimina|tira|apagar|remover|eliminar)\b/.test(normalized)) {
-    if (/\btodas|tudo|todos\b/.test(normalized)) return "clear"
+  if (/\b(remov|apaga|elimina|tira)/.test(normalized)) {
+    if (/\b(todas|tudo|todos)\b/.test(normalized)) return "clear"
     return "remove"
   }
-  if (/\b(desativ|desliga|inativ|desativar|desligar|desabilita)\b/.test(normalized)) return "deactivate"
-  if (/\b(ativa|ativar|liga|ligar|habilita|reativa)\b/.test(normalized)) return "activate"
-  if (/\b(lista|listar|mostra|mostrar|quais|que regras|ver regras)\b/.test(normalized)) return "list"
-  if (/\b(adiciona|adicionar|cria|criar|nova|novo|acrescenta|destac|realc|marca)\b/.test(normalized)) return "add"
+  if (/\b(desativ|desliga|inativ|desabilita)/.test(normalized)) return "deactivate"
+  if (/\b(ativa|ativar|liga|habilita|reativa)/.test(normalized)) return "activate"
+  if (/\b(lista|listar|mostra|mostrar|quais|que regras|ver regras)/.test(normalized)) return "list"
+  if (/\b(adiciona|cria|criar|nova|novo|acrescenta|destac|realc|marca)/.test(normalized)) return "add"
   return null
 }
 

@@ -220,7 +220,7 @@ function aggregateBy(bets, keyField) {
 
 // 1) Selection com mais apostas num período (default: ontem) ─────────────────
 export function topSelection(bets, params = {}) {
-  const { bets: scoped, label } = filterByPeriod(bets, params.period || "yesterday");
+  const { bets: scoped, label } = filterByPeriod(bets, params.period || "today");
   if (scoped.length === 0) {
     return { data: null, answer: `Não há apostas no período ${label} para determinar a selection mais apostada.` };
   }
@@ -447,7 +447,7 @@ export function topBetTypeForSport(bets, params = {}) {
 
 // 9) Hora do dia com mais apostas (default: ontem) ──────────────────────────
 export function peakHour(bets, params = {}) {
-  const { bets: scoped, label } = filterByPeriod(bets, params.period || "yesterday");
+  const { bets: scoped, label } = filterByPeriod(bets, params.period || "today");
   if (scoped.length === 0) {
     return { data: null, answer: `Sem apostas ${label}.` };
   }
@@ -864,7 +864,7 @@ export function detectAnomalies(bets) {
 export const TOOL_CATALOG = {
   "top-selection": {
     fn: topSelection,
-    description: "Selection com mais apostas num período. Default: ontem.",
+    description: "Selection com mais apostas num período. Default: hoje.",
     params: { period: "today|yesterday|1h|24h|7d|all" },
   },
   "selection-odd-mode": {
@@ -904,7 +904,7 @@ export const TOOL_CATALOG = {
   },
   "peak-hour": {
     fn: peakHour,
-    description: "Hora do dia com mais apostas. Default: ontem.",
+    description: "Hora do dia com mais apostas. Default: hoje.",
     params: { period: "today|yesterday|1h|24h|7d|all" },
   },
   "peak-hour-sport": {

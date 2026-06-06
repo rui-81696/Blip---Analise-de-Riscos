@@ -29,7 +29,25 @@ import {
   normalizeText,
 } from "../utils/highlightRules";
 
+// Modelo configurável via .env (VITE_WEBLLM_MODEL). O default é leve (1B) por
+// compatibilidade; para raciocínio mais forte recomenda-se um 3B+, ex.:
+// VITE_WEBLLM_MODEL=Llama-3.2-3B-Instruct-q4f16_1-MLC
 const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-1B-Instruct-q4f32_1-MLC";
+
+// Persona de analista de risco sénior, destilada do estudo (ESTUDO_ANALISTA.md).
+// Dá ao modelo a "mentalidade" para raciocinar — não é uma lista de palavras-chave.
+const ANALYST_SYSTEM = [
+  "És um analista de risco sénior de uma casa de apostas, com a mentalidade de um market maker: o objetivo é proteger a margem (vigorish ~9.5–11%), equilibrar o livro e conter a exposição (liability) — não recusar apostas por reflexo.",
+  "",
+  "Princípios de raciocínio:",
+  "- Ceticismo quantificado: volume grande em mercados Tier-1 (ligas/eventos mediáticos) é normalmente ruído saudável; volume concentrado e súbito em mercados de nicho é prioridade máxima (assimetria de informação).",
+  "- O TEMPO é decisivo: o mesmo volume diluído em horas é 'square money' benigno; comprimido em minutos sugere ação coordenada (fuga de informação, sinal de sindicato, stale-line attack).",
+  "- Um sinal isolado é quase sempre ruído; só a sobreposição de vários sinais constitui red flag. Evita falsos positivos.",
+  "- Distingue risco FINANCEIRO (sharps / value bettors — são legais; resposta: stake factoring, usá-los como radar de preço) de risco COMPORTAMENTAL/fraude (multi-contas, AML, match-fixing — resposta: KYC reforçado, void, bloqueio). Nunca trates um sharp como um fraudador.",
+  "- Resposta proporcional, nunca binária: profiling → stake factoring → KYC → void.",
+  "",
+  "Regras de saída: respondes SEMPRE em Português europeu, curto e profissional. Baseia-te SÓ nos dados fornecidos; nunca inventes números, contas, IPs, localizações nem alertas. Se não há dados, di-lo claramente.",
+].join("\n");
 
 // ─── Estado do motor (singleton) ───────────────────────────────────────────
 
@@ -158,7 +176,7 @@ function buildRouterPrompt(question, datasetContext, contextTurns) {
     toolsList,
     "",
     "Routing rules:",
-    "- 'ontem' / 'yesterday' → period=yesterday. 'hoje' / 'today' → period=today. 'última semana' / 'last week' → period=7d. 'última hora' → period=1h. Default → period=24h.",
+    "- 'ontem' / 'yesterday' → period=yesterday. 'hoje' / 'today' → period=today. 'última semana' / 'last week' → period=7d. 'última hora' → period=1h. Default (sem período indicado) → period=today (o dataset da demo é de hoje).",
     "- 'selection que teve mais apostas' → top-selection.",
     "- 'odd mais usada na selection X' → selection-odd-mode, params.selection='X'.",
     "- 'quantas selections tem o evento X' → event-selection-count, params.event='X'.",
@@ -189,42 +207,56 @@ function buildComposerPrompt({ question, toolResult, history }) {
   const toolData = toolResult.data ? JSON.stringify(toolResult.data) : "null";
 
   return [
-    "És um assistant profissional de análise de risco em apostas desportivas.",
-    "Respondes SEMPRE em Português europeu, de forma clara, natural e curta (1 a 4 frases).",
+    "Analisa os dados abaixo e responde como o analista de risco que és.",
     "",
-    "REGRAS CRÍTICAS:",
-    "1) Os números/valores/nomes vêm do bloco 'Dados da tool'. Não inventes nem alteres valores.",
-    "2) Se 'Dados da tool' indicar erro ou ausência de dados, comunica isso com clareza — não inventes alternativas.",
-    "3) Não menciones 'tool', 'JSON', 'WebLLM' ou detalhes internos. Fala como um analista humano.",
-    "4) Quando útil, acrescenta uma micro-recomendação (1 frase) só se for óbvia a partir dos dados — caso contrário, não acrescentes nada.",
+    "REGRAS:",
+    "1) Os números/valores/nomes vêm de 'Dados'. Nunca inventes nem alteres valores.",
+    "2) Se os dados indicarem erro ou ausência de dados, comunica isso com clareza — não inventes alternativas.",
+    "3) Responde à ÚLTIMA pergunta em 1 a 3 frases. NÃO repitas o histórico nem escrevas 'User:'/'Assistant:'.",
+    "4) Se (e só se) os dados revelarem algo digno de nota de risco (ex.: forte concentração, exposição elevada, padrão temporal), acrescenta no fim uma única linha começada por 'Nota:' com a leitura de analista. Caso contrário, não acrescentes nada.",
+    "5) Não menciones 'tool', 'JSON' nem detalhes internos.",
     "",
-    `Histórico recente:\n${historyBlock}`,
+    `Histórico recente (contexto, não repetir):\n${historyBlock}`,
     "",
-    `Pergunta do utilizador: ${question}`,
-    `Tool executada: ${toolResult.tool}`,
-    `Resposta determinística (fallback): ${toolResult.answer}`,
-    `Dados da tool: ${toolData}`,
+    `Pergunta: ${question}`,
+    `Dados: ${toolData}`,
+    `Resposta determinística de referência: ${toolResult.answer}`,
     "",
-    "Resposta final:",
+    "Resposta:",
   ].join("\n");
 }
 
-function buildRiskBriefingPrompt({ toolResult }) {
-  const anomalies = toolResult.data?.anomalies || [];
-  return [
-    "És o analista de risco da Blip. Vais compor um briefing operacional curto para a equipa que opera o livro.",
-    "Português europeu. Tom: profissional, factual, sem dramatismo, sem floreados.",
-    "",
-    "FORMATO (segue à risca):",
-    "- 1ª linha: avaliação geral em 1 frase ('Operação estável.' / 'Atenção pontual.' / 'Vários alertas em simultâneo — recomenda-se revisão imediata.').",
-    "- A seguir: bullets, um por alerta, na ordem em que vêm. Cada bullet começa com [SEVERIDADE] e descreve o alerta + 1 ação concreta sugerida (ex.: 'reduzir limite', 'pausar mercado', 'rever liability').",
-    "- NÃO inventes alertas; usa só os que estão nos dados.",
-    "- Se a lista vier vazia: responde apenas 'Sem padrões anómalos detetados.' e nada mais.",
-    "",
-    `Dados (lista de anomalias detetadas):\n${JSON.stringify(anomalies, null, 2)}`,
-    "",
-    "Briefing:",
-  ].join("\n");
+// Resposta tática de analista para cada tipo de anomalia detetada (grounded no
+// estudo: dicotomia financeiro vs comportamental, dimensão temporal, resposta
+// proporcional). Usada para compor o briefing de forma determinística.
+const ANOMALY_TACTICS = {
+  "volume-spike":
+    "Compressão temporal de volume. Distinguir 'square money' diluído (benigno) de injeção coordenada (fuga de informação / sinal de sindicato). Rever liquidez do mercado; suspender temporariamente se for nicho.",
+  "stake-surge":
+    "Subida anormal do stake médio — possível sharp/value betting ou sindicato. Se for jogo legal, conter com stake factoring (reduzir o fator), não bloquear; usar como radar de preço.",
+  "selection-concentration":
+    "Concentração unilateral aumenta a liability. Se o evento for de baixa liquidez/nicho, prioridade máxima (risco de integridade). Rever exposição, ajustar a linha e escalar se o mercado for obscuro.",
+  "single-exposure":
+    "Liability concentrada numa única aposta. Rever limite e aplicar stake factoring para conter a exposição marginal. Por si só não é fraude.",
+};
+
+// Briefing determinístico e fundamentado a partir das anomalias REAIS detetadas.
+// Determinístico por design: um analista não pode agir sobre alertas inventados.
+function buildRiskBriefing(anomalies) {
+  const highCount = anomalies.filter((anomaly) => anomaly.severity === "high").length;
+  const intro =
+    highCount > 0
+      ? `⚠ ${anomalies.length} ${anomalies.length === 1 ? "alerta" : "alertas"} — recomenda-se revisão imediata.`
+      : `Atenção pontual: ${anomalies.length} ${anomalies.length === 1 ? "sinal" : "sinais"} a monitorizar.`;
+
+  const bullets = anomalies
+    .map((anomaly) => {
+      const tactic = ANOMALY_TACTICS[anomaly.kind] || "Monitorizar e cruzar com outros sinais antes de agir.";
+      return `• [${String(anomaly.severity).toUpperCase()}] ${anomaly.title} — ${anomaly.detail}\n   Ação sugerida: ${tactic}`;
+    })
+    .join("\n");
+
+  return `${intro}\n\n${bullets}\n\nLembrete: um sinal isolado é ruído; confirma a sobreposição de sinais antes de qualquer medida coerciva.`;
 }
 
 function buildChitChatPrompt(question, history) {
@@ -315,7 +347,7 @@ function heuristicRoute(question = "") {
         ? "7d"
         : q.includes("ultima hora") || q.includes("last hour")
           ? "1h"
-          : "24h";
+          : "today";
 
   const STOPS = /(?:\s+(?:com|para|na|no|nas|nos|de|do|da|das|dos|com base|baseado|baseada|baseando|durante|últim|ultim)|[?.!,])/i;
   const extractAfter = (re) => {
@@ -378,7 +410,7 @@ function heuristicRoute(question = "") {
     if (sport || q.includes("sport") || q.includes("desporto")) {
       return { tool: "peak-hour-sport", params: { period: "7d", ...(sport && { sport }) } };
     }
-    return { tool: "peak-hour", params: { period: "yesterday" } };
+    return { tool: "peak-hour", params: { period: "today" } };
   }
 
   if (q.includes("maior stake") || q.includes("mais stake")) {
@@ -453,10 +485,7 @@ async function llmComposeStreamed({ question, toolResult, history, onToken, prom
     const stream = await engine.chat.completions.create({
       stream: true,
       messages: [
-        {
-          role: "system",
-          content: "És um assistant profissional de análise de risco em apostas desportivas. Falas em Português europeu. Respondes de forma curta e clara, baseando-te apenas nos dados fornecidos.",
-        },
+        { role: "system", content: ANALYST_SYSTEM },
         { role: "user", content: builder({ question, toolResult, history }) },
       ],
       temperature: 0.3,
@@ -616,21 +645,18 @@ export async function answerQuestion({ question, bets, history = [], onToken }) 
  * Corre detect-anomalies e usa um prompt diferente do composer normal,
  * focado em produzir um briefing curto com ações sugeridas.
  */
-export async function runRiskAnalysis({ bets, history = [], onToken }) {
+export async function runRiskAnalysis({ bets, onToken }) {
   const toolResult = runTool("detect-anomalies", bets, {});
+  const anomalies = toolResult.data?.anomalies || [];
 
-  if (currentStatus === "ready") {
-    const composed = await llmComposeStreamed({
-      question: "Análise de risco — gera o briefing operacional.",
-      toolResult,
-      history,
+  if (anomalies.length === 0) {
+    return emitDeterministic(
+      "✅ Operação estável — sem padrões anómalos nas janelas analisadas (volume, concentração e exposição dentro do normal).",
       onToken,
-      promptBuilder: buildRiskBriefingPrompt,
-    });
-    if (composed && composed.length > 0) return composed;
+    );
   }
 
-  return emitDeterministic(toolResult.answer, onToken);
+  return emitDeterministic(buildRiskBriefing(anomalies), onToken);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

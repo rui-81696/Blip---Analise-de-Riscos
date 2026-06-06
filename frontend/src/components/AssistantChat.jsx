@@ -273,14 +273,13 @@ export default function AssistantChat({ highlightRules = [], onRulesChange }) {
   }
 
   const SUGGESTIONS = [
-    { label: "Selection mais apostada ontem", text: "Qual foi a selection que teve mais apostas ontem?" },
+    { label: "Selection mais apostada hoje", text: "Qual foi a selection que teve mais apostas hoje?" },
     { label: "Distribuição betType hoje", text: "Qual é a distribuição de bets por betType hoje?" },
-    { label: "Maior prejuízo potencial", text: "Qual foi a bet que mais pode dar prejuízo à casa?" },
-    { label: "Pico de apostas ontem", text: "Qual foi a altura do dia de ontem que tivemos um maior número de apostas?" },
-    { label: "Pico — Tennis (7d)", text: "Qual a altura do dia que temos mais apostas para o sport Tennis com base na última semana?" },
+    { label: "Maior prejuízo potencial", text: "Qual foi a bet que mais pode dar prejuízo à casa hoje?" },
+    { label: "Pico de apostas hoje", text: "Qual foi a altura do dia de hoje com maior número de apostas?" },
     { label: "betType mais comum — Football", text: "Qual é o betType mais comum para apostas no sport Football?" },
-    { label: "Hoje vs ontem", text: "Compara o volume e exposição de hoje vs ontem." },
-    { label: "Resumo geral 24h", text: "Dá-me um resumo geral das últimas 24 horas." },
+    { label: "Resumo geral de hoje", text: "Dá-me um resumo geral de hoje." },
+    { label: "Análise de risco", text: "Há algum padrão suspeito ou anomalia nas apostas?" },
     { label: "Regra: destacar stake alto", text: "Adiciona uma regra para destacar linhas com stake total maior que 8000" },
   ];
 
