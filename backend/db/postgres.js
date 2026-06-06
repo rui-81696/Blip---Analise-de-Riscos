@@ -369,35 +369,6 @@ export async function getBetsCount() {
   return rows[0]?.total ?? 0;
 }
 
-export async function getInitialSyncBets({ limit = 400000 } = {}) {
-  if (!pool) {
-    throw new Error("PostgreSQL não está inicializado.");
-  }
-
-  const safeLimit = Math.max(Number(limit) || 400000, 1);
-
-  const { rows } = await pool.query(`
-    SELECT
-      id,
-      sport,
-      event,
-      bet_type AS "betType",
-      selection,
-      odd::float8 AS odd,
-      stake::float8 AS stake,
-      risk_score AS "riskScore",
-      exposure_risk AS "exposureRisk",
-      timestamp,
-      potential_payout AS "potentialPayout",
-      potential_profit AS "potentialProfit"
-    FROM bets
-    ORDER BY timestamp DESC
-    LIMIT $1
-  `, [safeLimit]);
-
-  return rows;
-}
-
 function getCleanupField(field) {
   if (field === "created_at") {
     return "created_at";
@@ -474,7 +445,11 @@ export async function getBetById(id) {
 export async function getGroupedBets({
   search = "",
   sport = "all",
+  minOdds = "",
+  maxOdds = "",
   minStake = 0,
+  maxStake = "",
+  minBets = 0,
   timeRange = 120,
   sortField = "totalExposure",
   sortOrder = "desc",
@@ -493,7 +468,8 @@ export async function getGroupedBets({
   if (safeTimeRange === -1) {
     whereClauses.push("timestamp >= date_trunc('day', now())");
   } else {
-    const minutes = Math.min(Math.max(Number(timeRange) || 120, 1), 24 * 60);
+    // Permite janelas até 30 dias (43200 min) — suporta "Últimos 7 dias" e "Último mês".
+    const minutes = Math.min(Math.max(Number(timeRange) || 120, 1), 30 * 24 * 60);
     params.push(minutes);
     whereClauses.push(`timestamp >= now() - ($${params.length} * interval '1 minute')`);
   }
@@ -503,10 +479,16 @@ export async function getGroupedBets({
     whereClauses.push(`sport = $${params.length}`);
   }
 
-  const safeMinStake = Math.max(Number(minStake) || 0, 0);
-  if (safeMinStake > 0) {
-    params.push(safeMinStake);
-    whereClauses.push(`stake >= $${params.length}`);
+  // Odd faz parte da chave de agregação, por isso filtrar por odd no WHERE
+  // equivale a filtrar ao nível do grupo.
+  if (minOdds !== "" && minOdds !== null && Number.isFinite(Number(minOdds))) {
+    params.push(Number(minOdds));
+    whereClauses.push(`odd >= $${params.length}`);
+  }
+
+  if (maxOdds !== "" && maxOdds !== null && Number.isFinite(Number(maxOdds))) {
+    params.push(Number(maxOdds));
+    whereClauses.push(`odd <= $${params.length}`);
   }
 
   const safeSearch = search.trim();
@@ -523,6 +505,25 @@ export async function getGroupedBets({
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+  // Filtros ao nível do grupo (stake total e nº de apostas) → HAVING, para
+  // coincidir com a semântica da tabela (filtra sobre o total agregado).
+  const havingClauses = [];
+  const safeMinStake = Math.max(Number(minStake) || 0, 0);
+  if (safeMinStake > 0) {
+    params.push(safeMinStake);
+    havingClauses.push(`SUM(stake) >= $${params.length}`);
+  }
+  if (maxStake !== "" && maxStake !== null && Number.isFinite(Number(maxStake))) {
+    params.push(Number(maxStake));
+    havingClauses.push(`SUM(stake) <= $${params.length}`);
+  }
+  const safeMinBets = Math.max(Number(minBets) || 0, 0);
+  if (safeMinBets > 0) {
+    params.push(safeMinBets);
+    havingClauses.push(`COUNT(*) >= $${params.length}`);
+  }
+  const havingSql = havingClauses.length ? `HAVING ${havingClauses.join(" AND ")}` : "";
+
   const sortFieldMap = {
     betCount: "bet_count",
     totalStake: "total_stake",
@@ -536,7 +537,7 @@ export async function getGroupedBets({
   const safeLimit = Math.min(Math.max(Number(limit) || 500, 1), 1000);
   const safeOffset = Math.max(Number(offset) || 0, 0);
 
-  const summaryQuery = `
+  const groupedCte = `
     WITH grouped AS (
       SELECT
         sport,
@@ -551,7 +552,12 @@ export async function getGroupedBets({
       FROM bets
       ${whereSql}
       GROUP BY sport, event, bet_type, selection, odd
+      ${havingSql}
     )
+  `;
+
+  const summaryQuery = `
+    ${groupedCte}
     SELECT
       COUNT(*)::int AS total_groups,
       COALESCE(SUM(bet_count), 0)::int AS total_bets,
@@ -561,21 +567,7 @@ export async function getGroupedBets({
 
   const rowsQueryParams = [...params, safeLimit, safeOffset];
   const rowsQuery = `
-    WITH grouped AS (
-      SELECT
-        sport,
-        event,
-        bet_type AS market,
-        selection,
-        odd::float8 AS odds,
-        COUNT(*)::int AS bet_count,
-        SUM(stake)::float8 AS total_stake,
-        SUM(potential_profit)::float8 AS total_exposure,
-        MAX(timestamp) AS last_bet_placed_at
-      FROM bets
-      ${whereSql}
-      GROUP BY sport, event, bet_type, selection, odd
-    )
+    ${groupedCte}
     SELECT
       sport,
       event,
@@ -604,6 +596,114 @@ export async function getGroupedBets({
     groups: rows,
     limit: safeLimit,
     offset: safeOffset,
+  };
+}
+
+/**
+ * Lista dos desportos distintos presentes na tabela.
+ * Resposta limitada (poucos desportos) — alimenta o dropdown da tabela.
+ */
+export async function getDistinctSports() {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const { rows } = await pool.query("SELECT DISTINCT sport FROM bets ORDER BY sport");
+  return rows.map((row) => row.sport).filter(Boolean);
+}
+
+/**
+ * Distribuição dos stakes de UM grupo (identificado pelos 5 campos da chave de
+ * agregação) por faixas configuráveis, mais estatísticas (count/min/max/avg).
+ *
+ * Toda a agregação corre em SQL: a resposta tem tamanho fixo (estatísticas +
+ * uma linha por faixa), independentemente de o grupo ter 6 ou 6 milhões de
+ * apostas. `ranges` = [{ min, max }] com `max` null/"" a significar "sem limite".
+ * Intervalos meio-abertos [min, max), coerentes com a UI do popover.
+ */
+export async function getStakeDistribution({
+  sport,
+  event,
+  betType,
+  selection,
+  odd,
+  timeRange = -1,
+  ranges = [],
+} = {}) {
+  if (!pool) {
+    throw new Error("PostgreSQL não está inicializado.");
+  }
+
+  const params = [sport, event, betType, selection, Number(odd)];
+  const whereClauses = [
+    "sport = $1",
+    "event = $2",
+    "bet_type = $3",
+    "selection = $4",
+    "odd = $5::numeric",
+  ];
+
+  const safeTimeRange = Number(timeRange);
+  if (safeTimeRange === -1) {
+    whereClauses.push("timestamp >= date_trunc('day', now())");
+  } else {
+    const minutes = Math.min(Math.max(Number(timeRange) || 120, 1), 30 * 24 * 60);
+    params.push(minutes);
+    whereClauses.push(`timestamp >= now() - ($${params.length} * interval '1 minute')`);
+  }
+
+  const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+
+  // Uma agregação FILTER por faixa — mantém tudo numa única query.
+  const safeRanges = Array.isArray(ranges) ? ranges : [];
+  const rangeSelects = safeRanges.map((range, index) => {
+    const min = Number(range?.min) || 0;
+    params.push(min);
+    const minIdx = params.length;
+
+    const hasMax = range?.max !== null && range?.max !== "" && range?.max !== undefined && Number.isFinite(Number(range.max));
+    let condition;
+    if (hasMax) {
+      params.push(Number(range.max));
+      const maxIdx = params.length;
+      condition = `stake >= $${minIdx} AND stake < $${maxIdx}`;
+    } else {
+      condition = `stake >= $${minIdx}`;
+    }
+
+    return `
+      COUNT(*) FILTER (WHERE ${condition})::int AS r${index}_count,
+      COALESCE(SUM(stake) FILTER (WHERE ${condition}), 0)::float8 AS r${index}_stake`;
+  });
+
+  const selectExtra = rangeSelects.length ? `,${rangeSelects.join(",")}` : "";
+
+  const query = `
+    SELECT
+      COUNT(*)::int AS count,
+      COALESCE(SUM(stake), 0)::float8 AS total_stake,
+      COALESCE(MIN(stake), 0)::float8 AS min_stake,
+      COALESCE(MAX(stake), 0)::float8 AS max_stake,
+      COALESCE(AVG(stake), 0)::float8 AS avg_stake${selectExtra}
+    FROM bets
+    ${whereSql}
+  `;
+
+  const { rows } = await pool.query(query, params);
+  const row = rows[0] || {};
+
+  return {
+    stats: {
+      count: row.count ?? 0,
+      totalStake: row.total_stake ?? 0,
+      min: row.min_stake ?? 0,
+      max: row.max_stake ?? 0,
+      avg: row.avg_stake ?? 0,
+    },
+    distribution: safeRanges.map((_, index) => ({
+      count: row[`r${index}_count`] ?? 0,
+      totalStake: row[`r${index}_stake`] ?? 0,
+    })),
   };
 }
 

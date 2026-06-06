@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./AssistantChat.scss";
-import { loadStoredBets } from "../utils/betsStore";
+
+// Janela de apostas pedida ao servidor por pergunta. As ferramentas de análise
+// continuam a correr no cliente, mas sobre um conjunto LIMITADO obtido on-demand
+// (já não há acúmulo no localStorage). Cobre os períodos comuns (hoje/ontem/7d);
+// perguntas sobre histórico mais antigo ficam limitadas a esta janela.
+const ASSISTANT_BETS_PERIOD = "7d";
+const ASSISTANT_BETS_LIMIT = 200000;
+
+async function fetchBetsWindow() {
+  try {
+    const res = await fetch(`/api/bets/range?period=${ASSISTANT_BETS_PERIOD}&limit=${ASSISTANT_BETS_LIMIT}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.bets) ? data.bets : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Risk Assistant — UI flutuante baseada em WebLLM.
@@ -8,7 +25,8 @@ import { loadStoredBets } from "../utils/betsStore";
  * Comportamento:
  *  - O modelo Llama é carregado APENAS quando o utilizador abre o chat
  *    pela primeira vez (lazy import + warmup).
- *  - Toda a análise é feita client-side a partir do betsStore.
+ *  - As ferramentas correm client-side sobre uma janela de apostas obtida
+ *    on-demand do servidor (REST).
  *  - Pipeline normal: LLM-router → tool determinística → LLM-composer (com streaming).
  *  - Pipeline dedicado: botão ⚠ executa `runRiskAnalysis` (detect-anomalies + briefing).
  *  - Multi-turn: histórico recente é passado quando a pergunta tem referências.
@@ -138,7 +156,7 @@ export default function AssistantChat() {
     });
 
     try {
-      const bets = loadStoredBets();
+      const bets = await fetchBetsWindow();
       const history = nextMessages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, text: m.text }));
@@ -179,7 +197,7 @@ export default function AssistantChat() {
     setMessages((prev) => [...prev, userMessage]);
 
     try {
-      const bets = loadStoredBets();
+      const bets = await fetchBetsWindow();
       const history = [...messages, userMessage]
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, text: m.text }));

@@ -13,7 +13,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
-import { PORT, CHUNK_SIZE, BETS_PER_BATCH, INTERVAL_MS, INITIAL_COUNT } from "./config.js";
+import { PORT, BETS_PER_BATCH, INTERVAL_MS } from "./config.js";
 import { allEventSelections, oddsMap } from "./generators/odds.js";
 import { generateBet, generateInitialBets } from "./generators/bets.js";
 import {
@@ -21,7 +21,6 @@ import {
   getMaxId,
   enqueueBets,
   flushAndClosePostgres,
-  getInitialSyncBets,
   initPostgres,
   isPostgresEnabled,
   startPostgresPersistenceWorker,
@@ -47,37 +46,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEMO_CUTOFF_FILE = path.join(__dirname, "db", "demo-cutoff.json");
 
-let initialBets = [];
 let globalNextId = 0;
-
-async function sendInitialBetsInChunks(ws, bets) {
-  for (let i = 0; i < bets.length; i += CHUNK_SIZE) {
-    if (ws.readyState !== ws.OPEN) {
-      return false;
-    }
-
-    const chunk = bets.slice(i, i + CHUNK_SIZE);
-
-    await new Promise((resolve, reject) => {
-      ws.send(JSON.stringify({ type: "initial", bets: chunk }), (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
-
-    if (ws.bufferedAmount > 8 * 1024 * 1024) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 10);
-      });
-    }
-  }
-
-  return true;
-}
 
 // ─── Routers modulares ──────────────────────────────────────────────
 app.use("/", rootRouter);
@@ -96,46 +65,26 @@ app.use("/api/assistant", assistantRouter);
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 
-wss.on("connection", async (ws) => {
+// O WebSocket já não transporta as apostas em bruto. Serve apenas como
+// "tick" em tempo real: avisa os clientes de que há dados novos para que
+// re-puxem os agregados via REST (/api/bets/grouped). Payload minúsculo e
+// de tamanho constante, independente do ritmo de entrada — escala a 500/seg.
+wss.on("connection", (ws) => {
   console.log("Cliente WebSocket conectado!");
-  ws.isInitialSyncDone = false;
-
-  try {
-    if (isPostgresEnabled()) {
-      const total = await getBetsCount();
-
-      // If DB has records, use them. If DB is empty but we have an in-memory seed,
-      // send the in-memory `initialBets` so clients see the seed immediately.
-      if (total === 0 && Array.isArray(initialBets) && initialBets.length > 0) {
-        const completed = await sendInitialBetsInChunks(ws, initialBets);
-        if (completed) {
-          ws.isInitialSyncDone = true;
-          console.log(`Apostas iniciais (in-memory seed) enviadas (${initialBets.length.toLocaleString()}).\n`);
-        }
-      } else {
-        const bets = await getInitialSyncBets({ limit: total });
-        const completed = await sendInitialBetsInChunks(ws, bets);
-
-        if (completed) {
-          ws.isInitialSyncDone = true;
-          console.log(`Apostas iniciais enviadas (${bets.length.toLocaleString()}).\n`);
-        }
-      }
-    } else {
-      const completed = await sendInitialBetsInChunks(ws, initialBets);
-      if (completed) {
-        ws.isInitialSyncDone = true;
-        console.log("Apostas iniciais enviadas.\n");
-      }
-    }
-  } catch (error) {
-    console.error("Erro ao enviar sync inicial via WebSocket:", error.message);
-  }
 
   ws.on("close", () => {
     console.log("Cliente WebSocket desconectado.");
   });
 });
+
+function broadcastTick(payload) {
+  const message = JSON.stringify(payload);
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      client.send(message);
+    }
+  });
+}
 
 function startLiveStreaming() {
   setInterval(() => {
@@ -146,17 +95,13 @@ function startLiveStreaming() {
       batch.push(generateBet({ nextId: globalNextId, isLive: true }));
     }
 
-    const payload = JSON.stringify({ type: "live", bets: batch });
-
-    wss.clients.forEach((client) => {
-      if (client.readyState === client.OPEN && client.isInitialSyncDone) {
-        client.send(payload);
-      }
-    });
-
+    // Persiste as apostas (fonte de verdade = Postgres)...
     if (isPostgresEnabled()) {
       enqueueBets(batch);
     }
+
+    // ...e avisa os clientes com um tick leve (sem enviar as apostas).
+    broadcastTick({ type: "tick", added: batch.length, latestId: globalNextId });
   }, INTERVAL_MS);
 }
 
@@ -215,17 +160,17 @@ try {
 
     if (currentCount === 0) {
       console.log("Seed inicial ativada: tabela bets vazia.");
-      initialBets = await generateInitialBets();
+      const seedBets = await generateInitialBets();
 
       // Atualizar o globalNextId após o seed para que o Live comece depois dele
-      globalNextId = initialBets.length > 0 ? initialBets[initialBets.length - 1].id : 0;
+      globalNextId = seedBets.length > 0 ? seedBets[seedBets.length - 1].id : 0;
 
-      enqueueBets(initialBets);
-      console.log(`Apostas iniciais enfileiradas para persistência (${initialBets.length.toLocaleString()}).`);
+      enqueueBets(seedBets);
+      console.log(`Apostas iniciais enfileiradas para persistência (${seedBets.length.toLocaleString()}).`);
     } else {
+      // Já não carregamos todas as apostas para memória: o frontend obtém os
+      // agregados via REST. O contador já foi sincronizado com getMaxId().
       console.log(`Seed inicial ignorada: já existem ${currentCount.toLocaleString()} registos em bets.`);
-      initialBets = await getInitialSyncBets({ limit: currentCount });
-      console.log(`Apostas carregadas da base de dados para initial sync WS (${initialBets.length.toLocaleString()}).`);
     }
 
     const liveCutoff = new Date();
@@ -236,8 +181,7 @@ try {
     });
     console.log(`Cutoff da demo registado para cleanup de live: ${liveCutoff.toISOString()}`);
   } else {
-    initialBets = [];
-    console.warn("PostgreSQL desativado: seed de 400k não será executada e o initial sync WS inicia vazio.");
+    console.warn("PostgreSQL desativado: os endpoints REST de agregação responderão 503. Ativa POSTGRES_ENABLED=true.");
   }
 
   startLiveStreaming();

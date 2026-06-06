@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import * as Popover from "@radix-ui/react-popover"
 import "./BetAnalysisPopover.scss"
-import { getRangeStartMs, loadStoredBets } from "../utils/betsStore"
 import { formatCurrency } from "../utils/betsAnalytics"
 
 // Faixas de stake por defeito. Intervalos meio-abertos [min, max): uma aposta
@@ -18,6 +17,7 @@ const DEFAULT_RANGES = [
 // Limiares de concentração (% do total de apostas do grupo numa faixa).
 const SUSPECT_THRESHOLD = 50 // vermelho — possível padrão suspeito
 const WARN_THRESHOLD = 30 // amarelo — atenção
+const RANGES_DEBOUNCE_MS = 350
 
 function cloneDefaultRanges() {
   return DEFAULT_RANGES.map((range) => ({ ...range }))
@@ -34,29 +34,18 @@ function getGroupKey(group) {
   return `${group.sport}|${group.event}|${group.market}|${group.selection}|${group.odds.toFixed(2)}`
 }
 
-// Filtra as apostas individuais que pertencem a este grupo agregado, usando os
-// mesmos campos que compõem a chave de agregação da tabela E a mesma janela
-// temporal — garantindo que a contagem coincide com o badge da linha.
-function loadGroupBets(group, timeRange) {
-  const targetOdds = group.odds.toFixed(2)
-  const rangeStartMs = getRangeStartMs(timeRange)
-
-  return loadStoredBets().filter((bet) => {
-    if (new Date(bet.timestamp).getTime() < rangeStartMs) return false
-    return (
-      bet.sport === group.sport &&
-      bet.event === group.event &&
-      bet.betType === group.market &&
-      bet.selection === group.selection &&
-      Number(bet.odd).toFixed(2) === targetOdds
-    )
-  })
+function normalizeRangeForRequest(range) {
+  const hasMax = range.max !== null && range.max !== "" && range.max !== undefined
+  return { min: Number(range.min) || 0, max: hasMax ? Number(range.max) : null }
 }
 
-function belongsToRange(stake, range) {
-  if (stake < range.min) return false
-  if (range.max === null || range.max === "" || range.max === undefined) return true
-  return stake < range.max
+function useDebouncedValue(value, delayMs) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(id)
+  }, [delayMs, value])
+  return debounced
 }
 
 function getConcentrationLevel(percentage) {
@@ -87,73 +76,84 @@ export default function BetAnalysisPopover({ group, timeRange = -1 }) {
   const [configMode, setConfigMode] = useState(false)
   // Faixas por instância — cada linha da tabela tem o seu próprio estado.
   const [ranges, setRanges] = useState(cloneDefaultRanges)
-  const [groupBets, setGroupBets] = useState([])
+  // Resultado vindo do servidor: { stats, distribution } (distribution alinhada
+  // por índice com as faixas enviadas).
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
 
   const groupKey = getGroupKey(group)
+  const debouncedRanges = useDebouncedValue(ranges, RANGES_DEBOUNCE_MS)
 
-  // Carrega as apostas do grupo apenas quando o popover abre (efeito = local
-  // de side-effects; o cálculo da distribuição fica memoizado em useMemo).
+  // Pede a distribuição ao servidor (agregação em SQL). Refaz quando o popover
+  // abre, quando o período muda, ou quando as faixas mudam (debounced).
   useEffect(() => {
     if (!open) return
-    setGroupBets(loadGroupBets(group, timeRange))
-    // groupKey identifica unicamente o grupo; group é estável dentro da linha.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, groupKey, timeRange])
 
-  const stats = useMemo(() => {
-    if (groupBets.length === 0) {
-      return { count: 0, avg: 0, min: 0, max: 0 }
-    }
+    const controller = new AbortController()
 
-    let sum = 0
-    let min = Infinity
-    let max = -Infinity
-
-    for (const bet of groupBets) {
-      const stake = Number(bet.stake) || 0
-      sum += stake
-      if (stake < min) min = stake
-      if (stake > max) max = stake
-    }
-
-    return { count: groupBets.length, avg: sum / groupBets.length, min, max }
-  }, [groupBets])
-
-  const distribution = useMemo(() => {
-    const total = groupBets.length
-
-    return ranges.map((range) => {
-      let count = 0
-      let totalStake = 0
-
-      for (const bet of groupBets) {
-        const stake = Number(bet.stake) || 0
-        if (belongsToRange(stake, range)) {
-          count += 1
-          totalStake += stake
+    fetch("/api/bets/distribution", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        sport: group.sport,
+        event: group.event,
+        betType: group.market,
+        selection: group.selection,
+        odd: group.odds,
+        timeRange,
+        ranges: debouncedRanges.map(normalizeRangeForRequest),
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.error || `Erro ${res.status}`)
         }
-      }
+        return res.json()
+      })
+      .then((payload) => {
+        setResult(payload)
+        setError(null)
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return
+        setError(err.message)
+      })
 
-      const percentage = total > 0 ? (count / total) * 100 : 0
+    return () => controller.abort()
+    // groupKey identifica unicamente o grupo (group muda de referência a cada
+    // refresh da tabela, mas a identidade mantém-se).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, groupKey, timeRange, debouncedRanges])
 
+  const stats = result?.stats ?? { count: 0, avg: 0, min: 0, max: 0 }
+
+  // Junta cada faixa enviada com o respetivo resultado (por índice) e calcula %.
+  const distribution = useMemo(() => {
+    const buckets = result?.distribution ?? []
+    const total = stats.count
+    return debouncedRanges.map((range, index) => {
+      const bucket = buckets[index] || { count: 0, totalStake: 0 }
+      const percentage = total > 0 ? (bucket.count / total) * 100 : 0
       return {
         ...range,
-        count,
-        totalStake,
+        count: bucket.count,
+        totalStake: bucket.totalStake,
         percentage,
         level: getConcentrationLevel(percentage),
       }
     })
-  }, [groupBets, ranges])
+  }, [result, debouncedRanges, stats.count])
 
   // Alerta automático: dispara se alguma faixa concentrar acima do limiar suspeito.
   const alertBucket = useMemo(() => {
-    if (groupBets.length === 0) return null
+    if (stats.count === 0) return null
     const suspicious = distribution
       .filter((bucket) => bucket.percentage > SUSPECT_THRESHOLD)
       .sort((a, b) => b.percentage - a.percentage)
     return suspicious[0] ?? null
-  }, [distribution, groupBets.length])
+  }, [distribution, stats.count])
 
   function updateRange(id, patch) {
     setRanges((prev) => prev.map((range) => (range.id === id ? { ...range, ...patch } : range)))
@@ -175,6 +175,8 @@ export default function BetAnalysisPopover({ group, timeRange = -1 }) {
     setOpen(nextOpen)
     if (!nextOpen) setConfigMode(false)
   }
+
+  const isLoading = open && result === null && !error
 
   return (
     <Popover.Root open={open} onOpenChange={handleOpenChange}>
@@ -216,8 +218,8 @@ export default function BetAnalysisPopover({ group, timeRange = -1 }) {
             </div>
           </header>
 
-          {stats.count === 0 ? (
-            <p className="bap-empty">Sem apostas registadas para este grupo.</p>
+          {error ? (
+            <p className="bap-empty">Não foi possível obter a análise: {error}</p>
           ) : configMode ? (
             <ConfigPanel
               ranges={ranges}
@@ -226,6 +228,10 @@ export default function BetAnalysisPopover({ group, timeRange = -1 }) {
               onAdd={addRange}
               onReset={resetRanges}
             />
+          ) : isLoading ? (
+            <p className="bap-empty">A calcular distribuição…</p>
+          ) : stats.count === 0 ? (
+            <p className="bap-empty">Sem apostas registadas para este grupo.</p>
           ) : (
             <>
               <div className="bap-quickstats">

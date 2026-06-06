@@ -6,8 +6,8 @@
  * tool chamar e com que parâmetros; depois recebe os dados estruturados
  * e formula a resposta em linguagem natural.
  *
- * Toda a análise corre client-side a partir do array de apostas já
- * acumulado no frontend (betsStore + WebSocket).
+ * Toda a análise corre client-side a partir do array de apostas obtido
+ * on-demand do servidor (REST /api/bets/range).
  */
 
 // ─── Formatadores ──────────────────────────────────────────────────────────
@@ -731,7 +731,7 @@ const ANOMALY_THRESHOLDS = {
   concentrationMinVolume: 10,
 };
 
-export function detectAnomalies(bets, params = {}) {
+export function detectAnomalies(bets) {
   const safe = Array.isArray(bets) ? bets : [];
   if (safe.length === 0) {
     return { data: { anomalies: [] }, answer: "Sem dados suficientes para detetar anomalias." };

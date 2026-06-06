@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import "./GroupedBetsTable.scss"
-import { appendStoredBets, getRangeStartMs, loadStoredBets, normalizeBet } from "../utils/betsStore"
 import BetAnalysisPopover from "./BetAnalysisPopover"
 
-const REFRESH_THROTTLE_MS = 1000
 const WS_RECONNECT_DELAY_MS = 1000
 const FILTER_DEBOUNCE_MS = 300
+const REFRESH_THROTTLE_MS = 1000
 const MAX_GROUP_ROWS = 500
 
 function useDebouncedValue(value, delayMs) {
@@ -34,14 +33,6 @@ function getWebSocketUrl() {
   return `${protocol}://${window.location.host}/ws`
 }
 
-function getSortValue(group, field) {
-  if (field === "betCount") return group.betCount
-  if (field === "totalStake") return group.totalStake
-  if (field === "lastBetPlacedAt") return new Date(group.lastBetPlacedAt).getTime()
-  if (field === "odds") return group.odds
-  return group.totalExposure
-}
-
 function formatTimeAgo(isoDate) {
   const date = new Date(isoDate)
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
@@ -59,6 +50,21 @@ function getHighlightClass(group) {
   if (group.totalStake > 8000) return "row-highlight-red"
   if (group.betCount > 500) return "row-highlight-orange"
   return ""
+}
+
+// Mapeia a linha agregada do endpoint (snake_case) para a forma usada na UI.
+function mapGroup(row) {
+  return {
+    sport: row.sport,
+    event: row.event,
+    market: row.market,
+    selection: row.selection,
+    odds: Number(row.odds),
+    betCount: row.bet_count,
+    totalStake: row.total_stake,
+    totalExposure: row.total_exposure,
+    lastBetPlacedAt: row.last_bet_placed_at,
+  }
 }
 
 function SortButton({ label, field, sortField, sortOrder, onSort }) {
@@ -86,7 +92,11 @@ export default function GroupedBetsTable() {
 
   const [sports, setSports] = useState(["all"])
   const [status, setStatus] = useState("connecting")
-  const [allBets, setAllBets] = useState(loadStoredBets)
+  const [groupedData, setGroupedData] = useState([])
+  const [summary, setSummary] = useState({ totalGroups: 0, totalBets: 0, totalExposure: 0 })
+  const [error, setError] = useState(null)
+  // Bumped sempre que o WS avisa que há dados novos (throttled) → refaz o fetch.
+  const [refreshNonce, setRefreshNonce] = useState(0)
 
   const debouncedSearchText = useDebouncedValue(searchText, FILTER_DEBOUNCE_MS)
   const debouncedSelectedSport = useDebouncedValue(selectedSport, FILTER_DEBOUNCE_MS)
@@ -97,202 +107,123 @@ export default function GroupedBetsTable() {
   const debouncedMaxStake = useDebouncedValue(maxStake, FILTER_DEBOUNCE_MS)
   const debouncedTimeRange = useDebouncedValue(timeRange, FILTER_DEBOUNCE_MS)
 
-  const seenIdsRef = useRef(new Set())
-  const sportSetRef = useRef(new Set())
-  const refreshTimerRef = useRef(null)
-  const reconnectTimerRef = useRef(null)
+  // ── Lista de desportos (uma vez) ────────────────────────────────────────
+  useEffect(() => {
+    const controller = new AbortController()
 
-  const { groupedData, summary } = useMemo(() => {
-    const searchLower = debouncedSearchText.trim().toLowerCase()
-    const rangeStartMs = getRangeStartMs(debouncedTimeRange)
+    fetch("/api/bets/sports", { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : { sports: [] }))
+      .then((data) => setSports(["all", ...(data.sports || [])]))
+      .catch(() => {
+        /* mantém apenas "all" se falhar */
+      })
 
-    // Agrega as apostas individuais (mesma fonte que o popover) aplicando a
-    // janela temporal sobre o timestamp de cada aposta.
-    const groupedMap = new Map()
+    return () => controller.abort()
+  }, [])
 
-    for (const bet of allBets) {
-      const betTsMs = new Date(bet.timestamp).getTime()
-      if (!Number.isFinite(betTsMs) || betTsMs < rangeStartMs) continue
-      if (debouncedSelectedSport !== "all" && bet.sport !== debouncedSelectedSport) continue
-      if (debouncedMinOdds !== "" && bet.odd < debouncedMinOdds) continue
-      if (debouncedMaxOdds !== "" && bet.odd > debouncedMaxOdds) continue
+  // ── Agregados via REST: refaz quando os filtros mudam ou chega um tick ───
+  useEffect(() => {
+    const controller = new AbortController()
 
-      if (searchLower) {
-        const searchable = `${bet.event} ${bet.sport} ${bet.betType} ${bet.selection}`.toLowerCase()
-        if (!searchable.includes(searchLower)) continue
-      }
+    const params = new URLSearchParams()
+    const search = debouncedSearchText.trim()
+    if (search) params.set("search", search)
+    if (debouncedSelectedSport !== "all") params.set("sport", debouncedSelectedSport)
+    if (debouncedMinOdds !== "") params.set("minOdds", String(debouncedMinOdds))
+    if (debouncedMaxOdds !== "") params.set("maxOdds", String(debouncedMaxOdds))
+    if (debouncedMinStake) params.set("minStake", String(debouncedMinStake))
+    if (debouncedMaxStake !== "") params.set("maxStake", String(debouncedMaxStake))
+    if (debouncedMinBets) params.set("minBets", String(debouncedMinBets))
+    params.set("timeRange", String(debouncedTimeRange))
+    params.set("sortField", sortField)
+    params.set("sortOrder", sortOrder)
+    params.set("limit", String(MAX_GROUP_ROWS))
 
-      const key = `${bet.sport}|${bet.event}|${bet.betType}|${bet.selection}|${bet.odd.toFixed(2)}`
-      const existing = groupedMap.get(key)
-
-      if (existing) {
-        existing.betCount += 1
-        existing.totalStake += bet.stake
-        existing.totalExposure += bet.potentialProfit
-        if (betTsMs > existing.lastBetTsMs) {
-          existing.lastBetTsMs = betTsMs
-          existing.lastBetPlacedAt = bet.timestamp
+    fetch(`/api/bets/grouped?${params.toString()}`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.error || `Erro ${res.status}`)
         }
-      } else {
-        groupedMap.set(key, {
-          sport: bet.sport,
-          event: bet.event,
-          market: bet.betType,
-          selection: bet.selection,
-          odds: bet.odd,
-          betCount: 1,
-          totalStake: bet.stake,
-          totalExposure: bet.potentialProfit,
-          lastBetPlacedAt: bet.timestamp,
-          lastBetTsMs: betTsMs,
+        return res.json()
+      })
+      .then((data) => {
+        setGroupedData((data.groups || []).map(mapGroup))
+        setSummary({
+          totalGroups: data.totalGroups || 0,
+          totalBets: data.totalBets || 0,
+          totalExposure: data.totalExposure || 0,
         })
-      }
-    }
+        setError(null)
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return
+        setError(err.message)
+      })
 
-    // Filtros ao nível do grupo (stake total e número mínimo de apostas).
-    const groups = Array.from(groupedMap.values()).filter((group) => {
-      if (group.totalStake < debouncedMinStake) return false
-      if (debouncedMaxStake !== "" && group.totalStake > debouncedMaxStake) return false
-      return group.betCount >= debouncedMinBets
-    })
-
-    groups.sort((a, b) => {
-      const left = getSortValue(a, sortField)
-      const right = getSortValue(b, sortField)
-      return sortOrder === "asc" ? left - right : right - left
-    })
-
-    return {
-      groupedData: groups.slice(0, MAX_GROUP_ROWS),
-      summary: {
-        totalGroups: groups.length,
-        totalBets: groups.reduce((acc, g) => acc + g.betCount, 0),
-        totalExposure: groups.reduce((acc, g) => acc + g.totalExposure, 0),
-      },
-    }
+    return () => controller.abort()
   }, [
-    allBets,
-    debouncedMaxOdds,
-    debouncedMaxStake,
-    debouncedMinBets,
-    debouncedMinOdds,
-    debouncedMinStake,
     debouncedSearchText,
     debouncedSelectedSport,
+    debouncedMinOdds,
+    debouncedMaxOdds,
+    debouncedMinStake,
+    debouncedMaxStake,
+    debouncedMinBets,
     debouncedTimeRange,
     sortField,
     sortOrder,
+    refreshNonce,
   ])
 
+  // ── WebSocket: só "tick" → agenda um refresh throttled ───────────────────
   useEffect(() => {
     let ws = null
     let isUnmounting = false
+    let reconnectTimer = null
+    let refreshTimer = null
 
     const scheduleRefresh = () => {
-      if (refreshTimerRef.current) {
-        return
-      }
-
-      refreshTimerRef.current = setTimeout(() => {
-        refreshTimerRef.current = null
-        setAllBets(loadStoredBets())
+      if (refreshTimer) return
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        setRefreshNonce((nonce) => nonce + 1)
       }, REFRESH_THROTTLE_MS)
     }
 
-    const ingestBets = (bets, { persist = true } = {}) => {
-      if (!Array.isArray(bets) || bets.length === 0) return
-
-      const acceptedBets = []
-
-      for (const rawBet of bets) {
-        const bet = normalizeBet(rawBet)
-
-        if (bet.id === undefined || bet.id === null || seenIdsRef.current.has(bet.id)) continue
-        if (Number.isNaN(new Date(bet.timestamp).getTime())) continue
-
-        seenIdsRef.current.add(bet.id)
-        if (bet.sport) sportSetRef.current.add(bet.sport)
-        acceptedBets.push(bet)
-      }
-
-      if (persist && acceptedBets.length > 0) {
-        appendStoredBets(acceptedBets)
-      }
-
-      setSports(["all", ...Array.from(sportSetRef.current).sort()])
-      scheduleRefresh()
-    }
-
-    const hydrateFromStorage = () => {
-      const storedBets = loadStoredBets()
-
-      if (storedBets.length > 0) {
-        ingestBets(storedBets, { persist: false })
-      }
-    }
-
     const connect = () => {
-      if (isUnmounting) {
-        return
-      }
+      if (isUnmounting) return
 
       setStatus("connecting")
       ws = new WebSocket(getWebSocketUrl())
 
-      ws.onopen = () => {
-        setStatus("open")
-        scheduleRefresh()
-      }
+      ws.onopen = () => setStatus("open")
 
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data)
-          if (payload?.type === "initial" || payload?.type === "live") {
-            ingestBets(payload.bets)
-          }
+          if (payload?.type === "tick") scheduleRefresh()
         } catch {
           // ignora mensagens inválidas
         }
       }
 
-      ws.onerror = () => {
-        setStatus("closed")
-      }
+      ws.onerror = () => setStatus("closed")
 
       ws.onclose = () => {
-        if (isUnmounting) {
-          return
-        }
-
+        if (isUnmounting) return
         setStatus("connecting")
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectTimerRef.current = null
-          connect()
-        }, WS_RECONNECT_DELAY_MS)
+        reconnectTimer = setTimeout(connect, WS_RECONNECT_DELAY_MS)
       }
     }
 
-    hydrateFromStorage()
     connect()
-
-    // no-op: removed expected initial count indicator
 
     return () => {
       isUnmounting = true
-
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current)
-        reconnectTimerRef.current = null
-      }
-
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current)
-        refreshTimerRef.current = null
-      }
-
-      if (ws && ws.readyState !== WebSocket.CLOSED) {
-        ws.close()
-      }
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (refreshTimer) clearTimeout(refreshTimer)
+      if (ws && ws.readyState !== WebSocket.CLOSED) ws.close()
     }
   }, [])
 
@@ -454,7 +385,9 @@ export default function GroupedBetsTable() {
           <tbody>
             {groupedData.length === 0 ? (
               <tr>
-                <td colSpan={9} className="empty-row">Sem apostas para os filtros escolhidos.</td>
+                <td colSpan={9} className="empty-row">
+                  {error ? `Não foi possível obter dados: ${error}` : "Sem apostas para os filtros escolhidos."}
+                </td>
               </tr>
             ) : (
               groupedData.map((group, index) => (
