@@ -46,7 +46,9 @@ export default function HighlightRulesSheet({ rules, onRulesChange }) {
             <div>
               <Dialog.Title className="hr-sheet-title">Regras de Highlight</Dialog.Title>
               <p className="hr-sheet-subtitle">
-                Uma linha é destacada quando <strong>todas</strong> as regras ativas se verificam.
+                Cada regra ativa destaca, de forma independente, as linhas que a cumprem.
+                Quando uma linha cumpre <strong>mais do que uma regra</strong>, a cor segue a{" "}
+                <strong>ordem das regras</strong> — a primeira da lista tem prioridade.
               </p>
             </div>
             <Dialog.Close className="hr-icon-button" aria-label="Fechar">

@@ -9,6 +9,10 @@ const FILTER_DEBOUNCE_MS = 300
 const REFRESH_THROTTLE_MS = 1000
 const MAX_GROUP_ROWS = 500
 
+// Ordenação por defeito (estado neutro, sem coluna ativa pelo utilizador).
+const DEFAULT_SORT_FIELD = "totalExposure"
+const DEFAULT_SORT_ORDER = "desc"
+
 function useDebouncedValue(value, delayMs) {
   const [debouncedValue, setDebouncedValue] = useState(value)
 
@@ -83,8 +87,10 @@ export default function GroupedBetsTable({ highlightRules = [], onRulesChange })
   const [minStake, setMinStake] = useState(0)
   const [maxStake, setMaxStake] = useState("")
   const [timeRange, setTimeRange] = useState(-1)
-  const [sortField, setSortField] = useState("totalExposure")
-  const [sortOrder, setSortOrder] = useState("desc")
+  // sortField === null → estado default (neutro). Caso contrário, é a coluna
+  // ativa escolhida pelo utilizador. sortOrder só é relevante quando há coluna.
+  const [sortField, setSortField] = useState(null)
+  const [sortOrder, setSortOrder] = useState(DEFAULT_SORT_ORDER)
 
   const [sports, setSports] = useState(["all"])
   const [status, setStatus] = useState("connecting")
@@ -131,8 +137,9 @@ export default function GroupedBetsTable({ highlightRules = [], onRulesChange })
     if (debouncedMaxStake !== "") params.set("maxStake", String(debouncedMaxStake))
     if (debouncedMinBets) params.set("minBets", String(debouncedMinBets))
     params.set("timeRange", String(debouncedTimeRange))
-    params.set("sortField", sortField)
-    params.set("sortOrder", sortOrder)
+    // Sem coluna ativa (estado default), envia a ordenação por defeito ao backend.
+    params.set("sortField", sortField ?? DEFAULT_SORT_FIELD)
+    params.set("sortOrder", sortField ? sortOrder : DEFAULT_SORT_ORDER)
     params.set("limit", String(MAX_GROUP_ROWS))
 
     fetch(`/api/bets/grouped?${params.toString()}`, { signal: controller.signal })
@@ -223,14 +230,27 @@ export default function GroupedBetsTable({ highlightRules = [], onRulesChange })
     }
   }, [])
 
+  // Ciclo de 3 estados por coluna:
+  //   1º clique  → descendente (↓)
+  //   2º clique  → ascendente  (↑)
+  //   3º clique  → volta ao default (↕, ordenação original por Exposição)
   function handleSort(field) {
-    if (sortField === field) {
-      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))
+    // Coluna diferente da ativa → começa em descendente.
+    if (sortField !== field) {
+      setSortField(field)
+      setSortOrder("desc")
       return
     }
 
-    setSortField(field)
-    setSortOrder("desc")
+    // Mesma coluna, estava descendente → passa a ascendente.
+    if (sortOrder === "desc") {
+      setSortOrder("asc")
+      return
+    }
+
+    // Mesma coluna, estava ascendente → volta ao estado default (neutro).
+    setSortField(null)
+    setSortOrder(DEFAULT_SORT_ORDER)
   }
 
   function clearFilters() {

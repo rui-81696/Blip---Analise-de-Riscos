@@ -1,8 +1,10 @@
 /**
  * Regras de Highlight Personalizadas.
  *
- * O analista define condições numéricas (ex.: "Stake Total > 8000") que, quando
- * TODAS as regras ativas são satisfeitas, destacam a linha da tabela.
+ * O analista define condições numéricas (ex.: "Stake Total > 8000"). Cada regra
+ * ativa atua de forma independente: uma linha é destacada se satisfizer QUALQUER
+ * regra ativa. Quando uma linha cumpre mais do que uma regra, a cor usada segue a
+ * ordem das regras na lista (a primeira regra tem prioridade).
  *
  * Este módulo é a fonte de verdade partilhada entre:
  *  - o painel (HighlightRulesSheet),
@@ -55,7 +57,7 @@ const OPERATOR_KEYS = new Set(RULE_OPERATORS.map((o) => o.key))
 export const RULE_COLORS = [
   { key: "red", label: "Vermelho", border: "#ff6b6b", bg: "rgba(210, 64, 64, 0.12)" },
   { key: "orange", label: "Laranja", border: "#ffbf69", bg: "rgba(214, 142, 27, 0.12)" },
-  { key: "yellow", label: "Amarelo", border: "#f5d76e", bg: "rgba(214, 191, 27, 0.12)" },
+  { key: "purple", label: "Roxo", border: "#a855f7", bg: "rgba(168, 85, 247, 0.2)" },
   { key: "blue", label: "Azul", border: "#4a90e2", bg: "rgba(74, 144, 226, 0.12)" },
   { key: "green", label: "Verde", border: "#81c784", bg: "rgba(76, 175, 80, 0.12)" },
 ]
@@ -143,19 +145,27 @@ export function evaluateRule(rule, row) {
 }
 
 /**
- * Devolve o estilo de highlight da linha (ou null). A linha é destacada apenas
- * se TODAS as regras ativas forem satisfeitas; a cor usada é a da primeira
- * regra ativa.
+ * Devolve o estilo de highlight da linha (ou null). Cada regra ativa é avaliada
+ * de forma independente: a linha é destacada se cumprir PELO MENOS UMA regra
+ * ativa. Quando cumpre mais do que uma, vence a PRIMEIRA regra ativa (por ordem
+ * da lista) que a linha satisfaz — ou seja, a ordem das regras define a
+ * prioridade da cor.
  */
 export function getRowHighlight(rules, row) {
   const active = (rules || []).filter((rule) => rule.active)
   if (active.length === 0) return null
 
-  const allMatch = active.every((rule) => evaluateRule(rule, row))
-  if (!allMatch) return null
+  // Primeira regra ativa, por ordem, que a linha satisfaz (prioridade por ordem).
+  const matched = active.find((rule) => evaluateRule(rule, row))
+  if (!matched) return null
 
-  const color = getColor(active[0].color)
-  return { borderColor: color.border, background: color.bg }
+  const color = getColor(matched.color)
+  return {
+    borderColor: color.border,
+    background: color.bg,
+    ruleId: matched.id,
+    ruleName: matched.name,
+  }
 }
 
 export function countActiveRules(rules) {
