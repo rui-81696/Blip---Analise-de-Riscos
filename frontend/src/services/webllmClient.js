@@ -16,6 +16,7 @@
 
 import { CreateMLCEngine } from "@mlc-ai/web-llm";
 import { runTool, TOOL_CATALOG, describeDataset } from "../utils/betsAnalytics";
+import { answerAnalytics, buildAnalyticsPolishPrompt } from "./agents/analyticsAgent";
 import {
   RULE_FIELDS,
   isValidField,
@@ -33,6 +34,14 @@ import {
 // compatibilidade; para raciocínio mais forte recomenda-se um 3B+, ex.:
 // VITE_WEBLLM_MODEL=Llama-3.2-3B-Instruct-q4f16_1-MLC
 const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-1B-Instruct-q4f32_1-MLC";
+
+// O Llama-1B é fraco demais para GERAR/REFORMULAR texto de forma fiável: corrompe
+// respostas já corretas (prefixos "Nota:"/"Resposta:", repetições, degeneração
+// "and the matter, and the matter..."). Por isso, com o 1B as respostas
+// estruturadas são SEMPRE determinísticas (corretas por construção, calculadas
+// pelas tools). Com um modelo maior (3B+, via VITE_WEBLLM_MODEL) reativa-se
+// automaticamente a reformulação/composição via LLM — que continua validada.
+const LLM_TEXT_OK = !/\b1B\b/i.test(MODEL_ID);
 
 // Persona de analista de risco sénior, destilada do estudo (ESTUDO_ANALISTA.md).
 // Dá ao modelo a "mentalidade" para raciocinar — não é uma lista de palavras-chave.
@@ -509,6 +518,35 @@ async function llmComposeStreamed({ question, toolResult, history, onToken, prom
   }
 }
 
+// ─── Polish do agente de Analytics (NÃO-streamed + validado pelo agente) ────
+// O agente calcula a resposta de forma determinística e passa-nos esta função
+// só para "reescrever" a frase de referência. NÃO fazemos streaming porque a
+// reformulação tem de ser VALIDADA contra os dados antes de ser mostrada — só
+// assim evitamos mostrar (e depois corrigir) texto possivelmente alucinado.
+async function analyticsPolish({ question, toolResult }) {
+  const engine = await getEngine();
+  if (!engine) return null;
+
+  try {
+    const response = await engine.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content:
+            "Reescreves texto em Português europeu, de forma natural e curta. Devolves APENAS a resposta reescrita, sem comentários, sem 'Nota:', sem inventar números ou nomes.",
+        },
+        { role: "user", content: buildAnalyticsPolishPrompt({ question, toolResult }) },
+      ],
+      temperature: 0.2,
+      max_tokens: 160,
+    });
+    return response?.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.warn("[WebLLM] analytics polish falhou:", error);
+    return null;
+  }
+}
+
 async function llmChitChatStreamed(question, history, onToken) {
   const engine = await getEngine();
   if (!engine) return null;
@@ -568,7 +606,7 @@ async function handleGeneralQuestion(question, history, onToken) {
     if (Number.isFinite(r)) return emitDeterministic(`${a} ${op} ${b} = ${r}.`, onToken);
   }
 
-  if (currentStatus === "ready") {
+  if (currentStatus === "ready" && LLM_TEXT_OK) {
     const reply = await llmChitChatStreamed(question, history, onToken);
     if (reply) return reply;
   }
@@ -608,23 +646,39 @@ export async function answerQuestion({ question, bets, history = [], onToken }) 
     return await handleGeneralQuestion(cleanQuestion, history, onToken);
   }
 
-  // 2) Routing — multi-turn só quando faz sentido
+  // 2) AGENTE DE ANALYTICS (prioritário) — routing + cálculo determinísticos e
+  //    corretos por construção; o LLM apenas reescreve o texto e essa
+  //    reformulação é VALIDADA contra os dados. Se o agente trata a pergunta,
+  //    devolvemos já — nunca passamos por composer genérico (que corrompia
+  //    respostas corretas). Só caímos no pipeline genérico para tools que o
+  //    agente não cobre (compare-periods, detect-anomalies, summary, etc.).
+  const analytics = await answerAnalytics({
+    question: cleanQuestion,
+    bets,
+    polish: currentStatus === "ready" && LLM_TEXT_OK ? analyticsPolish : undefined,
+    emit: (text) => emitDeterministic(text, onToken),
+  });
+  if (analytics.handled) {
+    return analytics.text;
+  }
+
+  // 3) Routing genérico — multi-turn só quando faz sentido
   const datasetContext = describeDataset(bets);
   const contextTurns = questionNeedsContext(cleanQuestion) ? recentTurns(history, 2) : [];
 
   let route = null;
-  if (currentStatus === "ready") {
+  if (currentStatus === "ready" && LLM_TEXT_OK) {
     route = await llmRoute(cleanQuestion, datasetContext, contextTurns);
   }
   if (!route) {
     route = heuristicRoute(cleanQuestion);
   }
 
-  // 3) Executar a tool
+  // 5) Executar a tool
   const toolResult = runTool(route.tool, bets, route.params);
 
-  // 4) Compor resposta
-  if (currentStatus === "ready" && toolResult.answer) {
+  // 6) Compor resposta
+  if (currentStatus === "ready" && LLM_TEXT_OK && toolResult.answer) {
     const composed = await llmComposeStreamed({
       question: cleanQuestion,
       toolResult,
@@ -841,7 +895,7 @@ function applyRuleAction(parsed, rules) {
  */
 export async function manageHighlightRules({ question, rules = [], onToken }) {
   let parsedFromLlm = null;
-  if (currentStatus === "ready") {
+  if (currentStatus === "ready" && LLM_TEXT_OK) {
     parsedFromLlm = await llmParseRule(question, rules);
   }
 
