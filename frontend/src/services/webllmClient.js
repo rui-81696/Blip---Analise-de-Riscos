@@ -18,17 +18,10 @@ import { CreateMLCEngine } from "@mlc-ai/web-llm";
 import { runTool, TOOL_CATALOG, describeDataset } from "../utils/betsAnalytics";
 import { answerAnalytics, buildAnalyticsPolishPrompt } from "./agents/analyticsAgent";
 import {
-  RULE_FIELDS,
-  isValidField,
-  isValidOperator,
-  matchField,
-  getFieldLabel,
-  getOperatorLabel,
-  formatRulePreview,
-  createDefaultRule,
-  parseRuleHeuristic,
-  normalizeText,
-} from "../utils/highlightRules";
+  buildRulePrompt,
+  manageHighlightRules as runHighlightRulesAgent,
+} from "./agents/highlightRulesAgent";
+import { runRiskAnalysis as runRiskAnalysisAgent } from "./agents/riskAgent";
 
 // Modelo configurável via .env (VITE_WEBLLM_MODEL). O default é leve (1B) por
 // compatibilidade; para raciocínio mais forte recomenda-se um 3B+, ex.:
@@ -233,39 +226,6 @@ function buildComposerPrompt({ question, toolResult, history }) {
     "",
     "Resposta:",
   ].join("\n");
-}
-
-// Resposta tática de analista para cada tipo de anomalia detetada (grounded no
-// estudo: dicotomia financeiro vs comportamental, dimensão temporal, resposta
-// proporcional). Usada para compor o briefing de forma determinística.
-const ANOMALY_TACTICS = {
-  "volume-spike":
-    "Compressão temporal de volume. Distinguir 'square money' diluído (benigno) de injeção coordenada (fuga de informação / sinal de sindicato). Rever liquidez do mercado; suspender temporariamente se for nicho.",
-  "stake-surge":
-    "Subida anormal do stake médio — possível sharp/value betting ou sindicato. Se for jogo legal, conter com stake factoring (reduzir o fator), não bloquear; usar como radar de preço.",
-  "selection-concentration":
-    "Concentração unilateral aumenta a liability. Se o evento for de baixa liquidez/nicho, prioridade máxima (risco de integridade). Rever exposição, ajustar a linha e escalar se o mercado for obscuro.",
-  "single-exposure":
-    "Liability concentrada numa única aposta. Rever limite e aplicar stake factoring para conter a exposição marginal. Por si só não é fraude.",
-};
-
-// Briefing determinístico e fundamentado a partir das anomalias REAIS detetadas.
-// Determinístico por design: um analista não pode agir sobre alertas inventados.
-function buildRiskBriefing(anomalies) {
-  const highCount = anomalies.filter((anomaly) => anomaly.severity === "high").length;
-  const intro =
-    highCount > 0
-      ? `⚠ ${anomalies.length} ${anomalies.length === 1 ? "alerta" : "alertas"} — recomenda-se revisão imediata.`
-      : `Atenção pontual: ${anomalies.length} ${anomalies.length === 1 ? "sinal" : "sinais"} a monitorizar.`;
-
-  const bullets = anomalies
-    .map((anomaly) => {
-      const tactic = ANOMALY_TACTICS[anomaly.kind] || "Monitorizar e cruzar com outros sinais antes de agir.";
-      return `• [${String(anomaly.severity).toUpperCase()}] ${anomaly.title} — ${anomaly.detail}\n   Ação sugerida: ${tactic}`;
-    })
-    .join("\n");
-
-  return `${intro}\n\n${bullets}\n\nLembrete: um sinal isolado é ruído; confirma a sobreposição de sinais antes de qualquer medida coerciva.`;
 }
 
 function buildChitChatPrompt(question, history) {
@@ -696,21 +656,11 @@ export async function answerQuestion({ question, bets, history = [], onToken }) 
 
 /**
  * Modo dedicado: Análise de Risco / briefing operacional.
- * Corre detect-anomalies e usa um prompt diferente do composer normal,
- * focado em produzir um briefing curto com ações sugeridas.
+ * Delega no agente de risco (detect-anomalies + briefing determinístico); o
+ * orquestrador injeta apenas a entrega ao UI (emit).
  */
 export async function runRiskAnalysis({ bets, onToken }) {
-  const toolResult = runTool("detect-anomalies", bets, {});
-  const anomalies = toolResult.data?.anomalies || [];
-
-  if (anomalies.length === 0) {
-    return emitDeterministic(
-      "✅ Operação estável — sem padrões anómalos nas janelas analisadas (volume, concentração e exposição dentro do normal).",
-      onToken,
-    );
-  }
-
-  return emitDeterministic(buildRiskBriefing(anomalies), onToken);
+  return runRiskAnalysisAgent({ bets, emit: (text) => emitDeterministic(text, onToken) });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -721,48 +671,8 @@ export async function runRiskAnalysis({ bets, onToken }) {
 // tolerância a erros); a aplicação e a confirmação são determinísticas. Quando
 // o LLM não está disponível, recorre-se ao parser heurístico.
 
-function listFieldsSentence() {
-  return RULE_FIELDS.map((field) => field.label).join(", ");
-}
-
-function describeRules(rules) {
-  if (!rules || rules.length === 0) return "(nenhuma regra definida)";
-  return rules
-    .map((rule, index) => `${index + 1}. "${rule.name}" — ${getFieldLabel(rule.field)} ${getOperatorLabel(rule.operator)} ${rule.value} [${rule.active ? "ativa" : "inativa"}]`)
-    .join("\n");
-}
-
-function buildRulePrompt(question, rules) {
-  return [
-    "You manage highlight rules for a sports-betting risk dashboard table.",
-    "The user writes in Portuguese or English and MAY contain typos — understand the intent.",
-    "",
-    "Numeric fields (output the EXACT key):",
-    "- totalStake (Stake Total / total apostado)",
-    "- betCount (Nº de apostas / número de apostas)",
-    "- totalExposure (Exposição)",
-    "- odds (Odds / cotação)",
-    "",
-    'Operators: ">", ">=", "<", "<=", "=", "!=".',
-    'Map natural language: maior/acima → ">"; "maior ou igual"/"pelo menos" → ">="; menor/abaixo → "<"; "menor ou igual"/"no máximo" → "<="; igual → "="; diferente → "!=".',
-    "",
-    "Actions: add, activate, deactivate, remove, clear, list, none.",
-    '- create/add/"destaca linhas onde"/"marca" → add',
-    '- enable → activate; disable → deactivate; delete one → remove; delete all → clear; "que regras tenho" → list; not about rules → none.',
-    "",
-    "Current rules:",
-    describeRules(rules),
-    "",
-    "Output STRICT JSON only, no prose:",
-    '{"action":"add|activate|deactivate|remove|clear|list|none","field":"<key|null>","operator":"<op|null>","value":<number|null>,"target":"<text|null>"}',
-    "- If the requested field is NOT in the list above, set field to null.",
-    '- For activate/deactivate/remove, "target" = the rule name or field mentioned, or "todas".',
-    "",
-    `Question: ${question}`,
-    "JSON:",
-  ].join("\n");
-}
-
+// Chamada ao motor para o parsing de regras. O orquestrador é o dono do engine;
+// o prompt e a aplicação determinística vivem no highlightRulesAgent.
 async function llmParseRule(question, rules) {
   const engine = await getEngine();
   if (!engine) return null;
@@ -784,126 +694,23 @@ async function llmParseRule(question, rules) {
   }
 }
 
-// Combina a saída do LLM com o parser heurístico (preenche campos em falta).
-function backfillRuleParse(parsed, question) {
-  const heuristic = parseRuleHeuristic(question);
-  const rawField = parsed && parsed.field;
-  const field = isValidField(rawField) ? rawField : matchField(String(rawField || "")) || heuristic.field;
-  const operator = isValidOperator(parsed && parsed.operator) ? parsed.operator : heuristic.operator;
-  const value = Number.isFinite(Number(parsed && parsed.value)) ? Number(parsed.value) : heuristic.value;
-  const validActions = new Set(["add", "activate", "deactivate", "remove", "clear", "list", "none"]);
-  const action = parsed && validActions.has(String(parsed.action)) ? parsed.action : heuristic.action;
-  const target = (parsed && typeof parsed.target === "string" && parsed.target) || heuristic.target;
-
-  return { action, field, operator, value, target };
-}
-
-function findTargetRuleIds(rules, target) {
-  const normalized = normalizeText(target || "");
-  if (rules.length === 0) return [];
-  if (!normalized) return rules.length === 1 ? [rules[0].id] : null;
-  if (/\b(todas|todos|tudo|all)\b/.test(normalized)) return rules.map((rule) => rule.id);
-
-  const field = matchField(target);
-  let matches = field ? rules.filter((rule) => rule.field === field) : [];
-
-  if (matches.length === 0) {
-    matches = rules.filter((rule) => {
-      const name = normalizeText(rule.name);
-      return name && (normalized.includes(name) || name.includes(normalized));
-    });
-  }
-
-  if (matches.length === 0 && rules.length === 1) return [rules[0].id];
-  return matches.length > 0 ? matches.map((rule) => rule.id) : null;
-}
-
-function applyRuleAction(parsed, rules) {
-  const safeRules = Array.isArray(rules) ? rules : [];
-  const action = parsed.action;
-
-  if (action === "list") {
-    return {
-      nextRules: safeRules,
-      reply: safeRules.length
-        ? `Regras atuais:\n${describeRules(safeRules)}`
-        : `Ainda não há regras definidas. Campos disponíveis: ${listFieldsSentence()}.`,
-    };
-  }
-
-  if (action === "add") {
-    if (!isValidField(parsed.field)) {
-      return {
-        nextRules: safeRules,
-        reply: `Não consigo criar essa regra — esse campo não é suportado. Campos disponíveis: ${listFieldsSentence()}. Operadores: maior (>), maior ou igual (>=), menor (<), menor ou igual (<=), igual (=), diferente (!=).`,
-      };
-    }
-    if (parsed.value === null || parsed.value === undefined || !Number.isFinite(Number(parsed.value))) {
-      return {
-        nextRules: safeRules,
-        reply: `Falta o valor numérico. Exemplo: "${getFieldLabel(parsed.field)} maior que 8000".`,
-      };
-    }
-    const operator = isValidOperator(parsed.operator) ? parsed.operator : ">";
-    const value = Number(parsed.value);
-    const rule = createDefaultRule({
-      field: parsed.field,
-      operator,
-      value,
-      name: `${getFieldLabel(parsed.field)} ${getOperatorLabel(operator)} ${value}`,
-    });
-    return { nextRules: [...safeRules, rule], reply: `Regra adicionada e ativa: ${formatRulePreview(rule)}.` };
-  }
-
-  if (action === "clear") {
-    if (safeRules.length === 0) return { nextRules: safeRules, reply: "Já não havia regras para remover." };
-    return { nextRules: [], reply: `Removi todas as regras (${safeRules.length}).` };
-  }
-
-  if (action === "remove" || action === "activate" || action === "deactivate") {
-    if (safeRules.length === 0) return { nextRules: safeRules, reply: "Ainda não há regras definidas." };
-
-    const ids = findTargetRuleIds(safeRules, parsed.target || getFieldLabel(parsed.field) || "");
-    if (!ids || ids.length === 0) {
-      return { nextRules: safeRules, reply: `Não percebi a que regra te referes. Regras atuais:\n${describeRules(safeRules)}` };
-    }
-
-    if (action === "remove") {
-      const removed = safeRules.filter((rule) => ids.includes(rule.id));
-      return {
-        nextRules: safeRules.filter((rule) => !ids.includes(rule.id)),
-        reply: `Removi ${removed.length} regra(s): ${removed.map((rule) => formatRulePreview(rule)).join("; ")}.`,
-      };
-    }
-
-    const active = action === "activate";
-    return {
-      nextRules: safeRules.map((rule) => (ids.includes(rule.id) ? { ...rule, active } : rule)),
-      reply: `${active ? "Ativei" : "Desativei"} ${ids.length} regra(s).`,
-    };
-  }
-
-  return {
-    nextRules: safeRules,
-    reply: `Posso gerir as Regras de Highlight. Campos: ${listFieldsSentence()}. Operadores: maior (>), maior ou igual (>=), menor (<), menor ou igual (<=), igual (=), diferente (!=). Ex.: "adiciona uma regra: stake total maior que 8000".`,
-  };
-}
-
 /**
- * Gere as Regras de Highlight a partir de linguagem natural.
- * Devolve { nextRules, reply }; o componente aplica nextRules e mostra reply.
+ * Gere as Regras de Highlight a partir de linguagem natural. Delega no
+ * highlightRulesAgent, injetando o parsing via LLM (quando disponível) e a
+ * entrega ao UI. Devolve { nextRules, reply }.
  */
 export async function manageHighlightRules({ question, rules = [], onToken }) {
-  let parsedFromLlm = null;
-  if (currentStatus === "ready" && LLM_TEXT_OK) {
-    parsedFromLlm = await llmParseRule(question, rules);
-  }
+  const parse =
+    currentStatus === "ready" && LLM_TEXT_OK
+      ? ({ question: q, rules: r }) => llmParseRule(q, r)
+      : undefined;
 
-  const parsed = backfillRuleParse(parsedFromLlm || {}, question);
-  const result = applyRuleAction(parsed, rules);
-
-  emitDeterministic(result.reply, onToken);
-  return result;
+  return runHighlightRulesAgent({
+    question,
+    rules,
+    parse,
+    emit: (text) => emitDeterministic(text, onToken),
+  });
 }
 
 export const SUPPORTED_QUESTIONS = [
