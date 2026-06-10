@@ -27,8 +27,6 @@ import {
 } from "./db/postgres.js";
 import betsRouter from "./routes/bets.js";
 import rootRouter from "./routes/root.js";
-import statsRouter from "./routes/stats.js";
-import assistantRouter from "./routes/assistant.js";
 
 // ─── 1. Criar app Express e servidor HTTP ───────────────────────────
 // O Express é um framework para criar APIs HTTP.
@@ -51,8 +49,6 @@ let globalNextId = 0;
 // ─── Routers modulares ──────────────────────────────────────────────
 app.use("/", rootRouter);
 app.use("/api/bets", betsRouter);
-app.use("/api/stats", statsRouter);
-app.use("/api/assistant", assistantRouter);
 
 // ─── 2. Criar WebSocket Server ──────────────────────────────────────
 // O WebSocket "agarra-se" ao servidor HTTP existente.
