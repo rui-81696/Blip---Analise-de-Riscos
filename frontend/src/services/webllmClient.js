@@ -26,7 +26,7 @@ import { runRiskAnalysis as runRiskAnalysisAgent } from "./agents/riskAgent";
 // Modelo configurável via .env (VITE_WEBLLM_MODEL). O default é leve (1B) por
 // compatibilidade; para raciocínio mais forte recomenda-se um 3B+, ex.:
 // VITE_WEBLLM_MODEL=Llama-3.2-3B-Instruct-q4f16_1-MLC
-const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-1B-Instruct-q4f32_1-MLC";
+const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-3B-Instruct-q4f32_1-MLC";
 
 // O Llama-1B é fraco demais para GERAR/REFORMULAR texto de forma fiável: corrompe
 // respostas já corretas (prefixos "Nota:"/"Resposta:", repetições, degeneração
@@ -358,7 +358,19 @@ function heuristicRoute(question = "") {
     return { tool: "event-selection-count", params: { period: "all", ...(event && { event }) } };
   }
 
-  if (q.includes("prejuizo") || q.includes("perda max") || q.includes("maior perda") || q.includes("maior exposicao") || q.includes("exposição") || q.includes("dar prejuizo")) {
+  const looksOpenAnalysis =
+    q.includes("porque") || q.includes("por que") || q.includes("hipotese") || q.includes("hipótese") ||
+    q.includes("hipoteses") || q.includes("hipóteses") || q.includes("causa") || q.includes("causas") ||
+    q.includes("explica") || q.includes("explicar") || q.includes("reduzir risco") ||
+    q.includes("sem piorar") || q.includes("conversao") || q.includes("conversão") ||
+    q.includes("acoes") || q.includes("ações") || q.includes("estrategia") || q.includes("estratégia") ||
+    q.includes("plano") || q.includes("o que farias") || q.includes("que duas acoes") || q.includes("que duas ações");
+
+  if (looksOpenAnalysis && (q.includes("risco") || q.includes("exposicao") || q.includes("exposição"))) {
+    return { tool: "detect-anomalies", params: {} };
+  }
+
+  if (q.includes("prejuizo") || q.includes("perda max") || q.includes("maior perda") || q.includes("maior exposicao") || q.includes("dar prejuizo")) {
     return { tool: "top-loss-bet", params: { period } };
   }
 

@@ -163,6 +163,17 @@ const LOSS = [
   "risco para a casa", "expoe a casa", "expoe mais a casa", "pior para a casa", "mais arriscada para a casa",
   "maior risco", "mais pode custar", "mais cara para a casa", "maior pagamento potencial",
 ];
+const TOP_LOSS_STRONG = [
+  "maior prejuizo", "maior prejuízo", "prejuizo potencial", "prejuízo potencial", "maior perda",
+  "perda maxima", "perda máxima", "maior exposicao", "maior exposição", "top loss",
+  "bet que mais pode dar prejuizo", "bet que mais pode dar prejuízo", "aposta mais arriscada",
+  "mais pode custar a casa", "mais pode custar à casa",
+];
+const OPEN_ANALYSIS = [
+  "porque", "por que", "hipotese", "hipótese", "hipoteses", "hipóteses", "causa", "causas",
+  "explica", "explicar", "reduzir risco", "sem piorar", "conversao", "conversão", "acoes",
+  "ações", "estrategia", "estratégia", "plano", "o que farias", "que duas acoes", "que duas ações",
+];
 const LEGS = ["legs", "leg", "pernas", "perna", "combinada", "multipla", "acumulada", "selecoes na bet"];
 
 /**
@@ -238,7 +249,14 @@ export function routeAnalytics(question = "") {
   }
 
   // 4) Bet com maior prejuízo potencial para a casa.
-  if (hasAny(LOSS)) {
+  // Evita apanhar perguntas abertas de diagnóstico/estratégia (ex.:
+  // "porque a exposição subiu" / "que ações aplicar para reduzir risco").
+  const looksOpenAnalysis = hasAny(OPEN_ANALYSIS);
+  const looksLikeTopLoss =
+    hasAny(TOP_LOSS_STRONG) ||
+    (hasAny(LOSS) && has("aposta", "bet") && has("maior", "mais", "top", "maxima", "máxima"));
+
+  if (looksLikeTopLoss && !looksOpenAnalysis) {
     return { intent: "top-loss-bet", tool: "top-loss-bet", params: { period: detectPeriod(qn, "24h") } };
   }
 
