@@ -26,7 +26,7 @@ import { runRiskAnalysis as runRiskAnalysisAgent } from "./agents/riskAgent";
 // Modelo configurável via .env (VITE_WEBLLM_MODEL). O default é leve (1B) por
 // compatibilidade; para raciocínio mais forte recomenda-se um 3B+, ex.:
 // VITE_WEBLLM_MODEL=Llama-3.2-3B-Instruct-q4f16_1-MLC
-const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-3B-Instruct-q4f32_1-MLC";
+const MODEL_ID = import.meta.env.VITE_WEBLLM_MODEL || "Llama-3.2-1B-Instruct-q4f32_1-MLC";
 
 // O Llama-1B é fraco demais para GERAR/REFORMULAR texto de forma fiável: corrompe
 // respostas já corretas (prefixos "Nota:"/"Resposta:", repetições, degeneração
