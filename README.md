@@ -194,11 +194,11 @@ Para alterar, edita `backend/config.js` e reinicia o backend.
 | Semanas | Foco | Estado |
 |---------|------|--------|
 | 1-2 | Requisitos e planeamento | ✅ Concluído |
-| 3-4 | Setup do projeto, tabela básica | 🔄 Em progresso |
-| 5-6 | Backend com filtros, frontend com filtros | ⏳ |
-| 7-8 | WebLLM, chat, métricas | ⏳ |
-| 9-10 | Testes E2E, debugging, UI/UX | ⏳ |
-| 11-12 | Otimizações, documentação, apresentação | ⏳ |
+| 3-4 | Setup do projeto, tabela básica | ✅ Concluído |
+| 5-6 | Backend com filtros, frontend com filtros | ✅ Concluído |
+| 7-8 | WebLLM, chat, métricas | ✅ Concluído |
+| 9-10 | Testes E2E, debugging, UI/UX | ✅ Concluído |
+| 11-12 | Otimizações, documentação, apresentação | ✅ Concluído |
 
 ## 📝 Licença
 
